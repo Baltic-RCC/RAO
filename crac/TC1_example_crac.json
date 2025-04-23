@@ -1,0 +1,1863 @@
+{
+  "type": "CRAC",
+  "version": "2.4",
+  "info": "TC1 CRAC Example",
+  "id": "LS_unsecure",
+  "name": "LS_unsecure",
+  "instants": [
+    {
+      "id": "preventive",
+      "kind": "PREVENTIVE"
+    },
+    {
+      "id": "outage",
+      "kind": "OUTAGE"
+    },
+    {
+      "id": "curative",
+      "kind": "CURATIVE"
+    }
+  ],
+  "ra-usage-limits-per-instant": [],
+  "networkElementsNamePerId": {},
+  "contingencies": [
+    {
+      "id": "288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "name": "OCO_BE-G1",
+      "networkElementsIds": [
+        "3a3b27be-b18b-4385-b557-6735d733baf0"
+      ]
+    },
+    {
+      "id": "2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "name": "OCO_BE-Line_4",
+      "networkElementsIds": [
+        "ed0c5d75-4a54-43c8-b782-b20d7431630b"
+      ]
+    },
+    {
+      "id": "844e70d2-b39d-4093-9edc-ef931bc435db",
+      "name": "OCO_NL-Line_1",
+      "networkElementsIds": [
+        "7f43f508-2496-4b64-9146-0a40406cbe49"
+      ]
+    },
+    {
+      "id": "8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "name": "EXCO_ANVERS_BRUSSELS",
+      "networkElementsIds": [
+        "ffbabc27-1ccd-4fdc-b037-e341706c8d29",
+        "17086487-56ba-4979-b8de-064025a6b4da"
+      ]
+    },
+    {
+      "id": "bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "name": "OCO_BE-Line_3",
+      "networkElementsIds": [
+        "78736387-5f60-4832-b3fe-d50daf81b0a6"
+      ]
+    },
+    {
+      "id": "cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "name": "OCO_BE-TR2_2",
+      "networkElementsIds": [
+        "b94318f6-6d24-4f56-96b9-df2531ad6543"
+      ]
+    },
+    {
+      "id": "ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "name": "OOR_NL_BORDER",
+      "networkElementsIds": [
+        "a279a3dc-550b-426c-af3a-61b7be508dcc",
+        "dad02278-bd25-476f-8f58-dbe44be72586"
+      ]
+    },
+    {
+      "id": "f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "name": "OCO_BE-Line_1",
+      "networkElementsIds": [
+        "17086487-56ba-4979-b8de-064025a6b4da"
+      ]
+    }
+  ],
+  "flowCnecs": [
+    {
+      "id": "0423e5f8-aab0-4d70-b65c-898340d27023",
+      "name": "BE-Line_4",
+      "networkElementId": "ed0c5d75-4a54-43c8-b782-b20d7431630b",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "instant": "preventive",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0423e5f8-aab0-4d70-b65c-898340d27023_8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "name": "BE-Line_4",
+      "networkElementId": "ed0c5d75-4a54-43c8-b782-b20d7431630b",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0423e5f8-aab0-4d70-b65c-898340d27023_ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "name": "BE-Line_4",
+      "networkElementId": "ed0c5d75-4a54-43c8-b782-b20d7431630b",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0423e5f8-aab0-4d70-b65c-898340d27023_cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "name": "BE-Line_4",
+      "networkElementId": "ed0c5d75-4a54-43c8-b782-b20d7431630b",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0423e5f8-aab0-4d70-b65c-898340d27023_288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "name": "BE-Line_4",
+      "networkElementId": "ed0c5d75-4a54-43c8-b782-b20d7431630b",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0423e5f8-aab0-4d70-b65c-898340d27023_844e70d2-b39d-4093-9edc-ef931bc435db",
+      "name": "BE-Line_4",
+      "networkElementId": "ed0c5d75-4a54-43c8-b782-b20d7431630b",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "844e70d2-b39d-4093-9edc-ef931bc435db",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0423e5f8-aab0-4d70-b65c-898340d27023_f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "name": "BE-Line_4",
+      "networkElementId": "ed0c5d75-4a54-43c8-b782-b20d7431630b",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0423e5f8-aab0-4d70-b65c-898340d27023_bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "name": "BE-Line_4",
+      "networkElementId": "ed0c5d75-4a54-43c8-b782-b20d7431630b",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0423e5f8-aab0-4d70-b65c-898340d27023_2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "name": "BE-Line_4",
+      "networkElementId": "ed0c5d75-4a54-43c8-b782-b20d7431630b",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0d88e19b-5a8f-4735-beea-2e07a458cabc",
+      "name": "BE-Line_3",
+      "networkElementId": "78736387-5f60-4832-b3fe-d50daf81b0a6",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "instant": "preventive",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0d88e19b-5a8f-4735-beea-2e07a458cabc_8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "name": "BE-Line_3",
+      "networkElementId": "78736387-5f60-4832-b3fe-d50daf81b0a6",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0d88e19b-5a8f-4735-beea-2e07a458cabc_ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "name": "BE-Line_3",
+      "networkElementId": "78736387-5f60-4832-b3fe-d50daf81b0a6",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0d88e19b-5a8f-4735-beea-2e07a458cabc_cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "name": "BE-Line_3",
+      "networkElementId": "78736387-5f60-4832-b3fe-d50daf81b0a6",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0d88e19b-5a8f-4735-beea-2e07a458cabc_288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "name": "BE-Line_3",
+      "networkElementId": "78736387-5f60-4832-b3fe-d50daf81b0a6",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0d88e19b-5a8f-4735-beea-2e07a458cabc_844e70d2-b39d-4093-9edc-ef931bc435db",
+      "name": "BE-Line_3",
+      "networkElementId": "78736387-5f60-4832-b3fe-d50daf81b0a6",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "844e70d2-b39d-4093-9edc-ef931bc435db",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0d88e19b-5a8f-4735-beea-2e07a458cabc_f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "name": "BE-Line_3",
+      "networkElementId": "78736387-5f60-4832-b3fe-d50daf81b0a6",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0d88e19b-5a8f-4735-beea-2e07a458cabc_bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "name": "BE-Line_3",
+      "networkElementId": "78736387-5f60-4832-b3fe-d50daf81b0a6",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "0d88e19b-5a8f-4735-beea-2e07a458cabc_2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "name": "BE-Line_3",
+      "networkElementId": "78736387-5f60-4832-b3fe-d50daf81b0a6",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "261ce371-e043-4d96-8384-9c702f365378",
+      "name": "BE-Line_6",
+      "networkElementId": "ffbabc27-1ccd-4fdc-b037-e341706c8d29",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "instant": "preventive",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "261ce371-e043-4d96-8384-9c702f365378_8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "name": "BE-Line_6",
+      "networkElementId": "ffbabc27-1ccd-4fdc-b037-e341706c8d29",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "261ce371-e043-4d96-8384-9c702f365378_ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "name": "BE-Line_6",
+      "networkElementId": "ffbabc27-1ccd-4fdc-b037-e341706c8d29",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "261ce371-e043-4d96-8384-9c702f365378_cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "name": "BE-Line_6",
+      "networkElementId": "ffbabc27-1ccd-4fdc-b037-e341706c8d29",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "261ce371-e043-4d96-8384-9c702f365378_288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "name": "BE-Line_6",
+      "networkElementId": "ffbabc27-1ccd-4fdc-b037-e341706c8d29",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "261ce371-e043-4d96-8384-9c702f365378_844e70d2-b39d-4093-9edc-ef931bc435db",
+      "name": "BE-Line_6",
+      "networkElementId": "ffbabc27-1ccd-4fdc-b037-e341706c8d29",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "844e70d2-b39d-4093-9edc-ef931bc435db",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "261ce371-e043-4d96-8384-9c702f365378_f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "name": "BE-Line_6",
+      "networkElementId": "ffbabc27-1ccd-4fdc-b037-e341706c8d29",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "261ce371-e043-4d96-8384-9c702f365378_bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "name": "BE-Line_6",
+      "networkElementId": "ffbabc27-1ccd-4fdc-b037-e341706c8d29",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "261ce371-e043-4d96-8384-9c702f365378_2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "name": "BE-Line_6",
+      "networkElementId": "ffbabc27-1ccd-4fdc-b037-e341706c8d29",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "616abfab-70ba-450a-b012-0eadd1f54d1a",
+      "name": "BE-Line_7",
+      "networkElementId": "a16b4a6c-70b1-4abf-9a9d-bd0fa47f9fe4",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "instant": "preventive",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "616abfab-70ba-450a-b012-0eadd1f54d1a_8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "name": "BE-Line_7",
+      "networkElementId": "a16b4a6c-70b1-4abf-9a9d-bd0fa47f9fe4",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "616abfab-70ba-450a-b012-0eadd1f54d1a_ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "name": "BE-Line_7",
+      "networkElementId": "a16b4a6c-70b1-4abf-9a9d-bd0fa47f9fe4",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "616abfab-70ba-450a-b012-0eadd1f54d1a_cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "name": "BE-Line_7",
+      "networkElementId": "a16b4a6c-70b1-4abf-9a9d-bd0fa47f9fe4",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "616abfab-70ba-450a-b012-0eadd1f54d1a_288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "name": "BE-Line_7",
+      "networkElementId": "a16b4a6c-70b1-4abf-9a9d-bd0fa47f9fe4",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "616abfab-70ba-450a-b012-0eadd1f54d1a_844e70d2-b39d-4093-9edc-ef931bc435db",
+      "name": "BE-Line_7",
+      "networkElementId": "a16b4a6c-70b1-4abf-9a9d-bd0fa47f9fe4",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "844e70d2-b39d-4093-9edc-ef931bc435db",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "616abfab-70ba-450a-b012-0eadd1f54d1a_f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "name": "BE-Line_7",
+      "networkElementId": "a16b4a6c-70b1-4abf-9a9d-bd0fa47f9fe4",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "616abfab-70ba-450a-b012-0eadd1f54d1a_bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "name": "BE-Line_7",
+      "networkElementId": "a16b4a6c-70b1-4abf-9a9d-bd0fa47f9fe4",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "616abfab-70ba-450a-b012-0eadd1f54d1a_2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "name": "BE-Line_7",
+      "networkElementId": "a16b4a6c-70b1-4abf-9a9d-bd0fa47f9fe4",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6ec89945-23d1-4db1-aeb9-a4d38d014f0a",
+      "name": "BE-Line_5",
+      "networkElementId": "b18cd1aa-7808-49b9-a7cf-605eaf07b006",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "instant": "preventive",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6ec89945-23d1-4db1-aeb9-a4d38d014f0a_8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "name": "BE-Line_5",
+      "networkElementId": "b18cd1aa-7808-49b9-a7cf-605eaf07b006",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6ec89945-23d1-4db1-aeb9-a4d38d014f0a_ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "name": "BE-Line_5",
+      "networkElementId": "b18cd1aa-7808-49b9-a7cf-605eaf07b006",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6ec89945-23d1-4db1-aeb9-a4d38d014f0a_cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "name": "BE-Line_5",
+      "networkElementId": "b18cd1aa-7808-49b9-a7cf-605eaf07b006",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6ec89945-23d1-4db1-aeb9-a4d38d014f0a_288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "name": "BE-Line_5",
+      "networkElementId": "b18cd1aa-7808-49b9-a7cf-605eaf07b006",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6ec89945-23d1-4db1-aeb9-a4d38d014f0a_844e70d2-b39d-4093-9edc-ef931bc435db",
+      "name": "BE-Line_5",
+      "networkElementId": "b18cd1aa-7808-49b9-a7cf-605eaf07b006",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "844e70d2-b39d-4093-9edc-ef931bc435db",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6ec89945-23d1-4db1-aeb9-a4d38d014f0a_f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "name": "BE-Line_5",
+      "networkElementId": "b18cd1aa-7808-49b9-a7cf-605eaf07b006",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6ec89945-23d1-4db1-aeb9-a4d38d014f0a_bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "name": "BE-Line_5",
+      "networkElementId": "b18cd1aa-7808-49b9-a7cf-605eaf07b006",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6ec89945-23d1-4db1-aeb9-a4d38d014f0a_2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "name": "BE-Line_5",
+      "networkElementId": "b18cd1aa-7808-49b9-a7cf-605eaf07b006",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6eceb34e-d8f3-49c8-add6-77a6c8f6416d",
+      "name": "NL-Line_2",
+      "networkElementId": "dad02278-bd25-476f-8f58-dbe44be72586",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "instant": "preventive",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6eceb34e-d8f3-49c8-add6-77a6c8f6416d_8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "name": "NL-Line_2",
+      "networkElementId": "dad02278-bd25-476f-8f58-dbe44be72586",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6eceb34e-d8f3-49c8-add6-77a6c8f6416d_ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "name": "NL-Line_2",
+      "networkElementId": "dad02278-bd25-476f-8f58-dbe44be72586",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6eceb34e-d8f3-49c8-add6-77a6c8f6416d_cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "name": "NL-Line_2",
+      "networkElementId": "dad02278-bd25-476f-8f58-dbe44be72586",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6eceb34e-d8f3-49c8-add6-77a6c8f6416d_288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "name": "NL-Line_2",
+      "networkElementId": "dad02278-bd25-476f-8f58-dbe44be72586",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6eceb34e-d8f3-49c8-add6-77a6c8f6416d_844e70d2-b39d-4093-9edc-ef931bc435db",
+      "name": "NL-Line_2",
+      "networkElementId": "dad02278-bd25-476f-8f58-dbe44be72586",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "844e70d2-b39d-4093-9edc-ef931bc435db",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6eceb34e-d8f3-49c8-add6-77a6c8f6416d_f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "name": "NL-Line_2",
+      "networkElementId": "dad02278-bd25-476f-8f58-dbe44be72586",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6eceb34e-d8f3-49c8-add6-77a6c8f6416d_bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "name": "NL-Line_2",
+      "networkElementId": "dad02278-bd25-476f-8f58-dbe44be72586",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "6eceb34e-d8f3-49c8-add6-77a6c8f6416d_2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "name": "NL-Line_2",
+      "networkElementId": "dad02278-bd25-476f-8f58-dbe44be72586",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "70174a35-0e2d-4a0a-8854-ded79af22d2f",
+      "name": "BE-Line_2",
+      "networkElementId": "b58bf21a-096a-4dae-9a01-3f03b60c24c7",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "instant": "preventive",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "70174a35-0e2d-4a0a-8854-ded79af22d2f_8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "name": "BE-Line_2",
+      "networkElementId": "b58bf21a-096a-4dae-9a01-3f03b60c24c7",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "70174a35-0e2d-4a0a-8854-ded79af22d2f_ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "name": "BE-Line_2",
+      "networkElementId": "b58bf21a-096a-4dae-9a01-3f03b60c24c7",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "70174a35-0e2d-4a0a-8854-ded79af22d2f_cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "name": "BE-Line_2",
+      "networkElementId": "b58bf21a-096a-4dae-9a01-3f03b60c24c7",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "70174a35-0e2d-4a0a-8854-ded79af22d2f_288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "name": "BE-Line_2",
+      "networkElementId": "b58bf21a-096a-4dae-9a01-3f03b60c24c7",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "70174a35-0e2d-4a0a-8854-ded79af22d2f_844e70d2-b39d-4093-9edc-ef931bc435db",
+      "name": "BE-Line_2",
+      "networkElementId": "b58bf21a-096a-4dae-9a01-3f03b60c24c7",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "844e70d2-b39d-4093-9edc-ef931bc435db",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "70174a35-0e2d-4a0a-8854-ded79af22d2f_f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "name": "BE-Line_2",
+      "networkElementId": "b58bf21a-096a-4dae-9a01-3f03b60c24c7",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "70174a35-0e2d-4a0a-8854-ded79af22d2f_bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "name": "BE-Line_2",
+      "networkElementId": "b58bf21a-096a-4dae-9a01-3f03b60c24c7",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "70174a35-0e2d-4a0a-8854-ded79af22d2f_2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "name": "BE-Line_2",
+      "networkElementId": "b58bf21a-096a-4dae-9a01-3f03b60c24c7",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "f8a47760-b7ce-4d0b-874c-4d21a107c8a5",
+      "name": "BE-Line_1",
+      "networkElementId": "17086487-56ba-4979-b8de-064025a6b4da",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "instant": "preventive",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "f8a47760-b7ce-4d0b-874c-4d21a107c8a5_8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "name": "BE-Line_1",
+      "networkElementId": "17086487-56ba-4979-b8de-064025a6b4da",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "f8a47760-b7ce-4d0b-874c-4d21a107c8a5_ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "name": "BE-Line_1",
+      "networkElementId": "17086487-56ba-4979-b8de-064025a6b4da",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "f8a47760-b7ce-4d0b-874c-4d21a107c8a5_cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "name": "BE-Line_1",
+      "networkElementId": "17086487-56ba-4979-b8de-064025a6b4da",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "f8a47760-b7ce-4d0b-874c-4d21a107c8a5_288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "name": "BE-Line_1",
+      "networkElementId": "17086487-56ba-4979-b8de-064025a6b4da",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "f8a47760-b7ce-4d0b-874c-4d21a107c8a5_844e70d2-b39d-4093-9edc-ef931bc435db",
+      "name": "BE-Line_1",
+      "networkElementId": "17086487-56ba-4979-b8de-064025a6b4da",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "844e70d2-b39d-4093-9edc-ef931bc435db",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "f8a47760-b7ce-4d0b-874c-4d21a107c8a5_f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "name": "BE-Line_1",
+      "networkElementId": "17086487-56ba-4979-b8de-064025a6b4da",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "f8a47760-b7ce-4d0b-874c-4d21a107c8a5_bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "name": "BE-Line_1",
+      "networkElementId": "17086487-56ba-4979-b8de-064025a6b4da",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "f8a47760-b7ce-4d0b-874c-4d21a107c8a5_2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "name": "BE-Line_1",
+      "networkElementId": "17086487-56ba-4979-b8de-064025a6b4da",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A094",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "fd243c93-c170-4408-968b-fc65a263de33",
+      "name": "NL-Line_1",
+      "networkElementId": "7f43f508-2496-4b64-9146-0a40406cbe49",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "instant": "preventive",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "fd243c93-c170-4408-968b-fc65a263de33_8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "name": "NL-Line_1",
+      "networkElementId": "7f43f508-2496-4b64-9146-0a40406cbe49",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "8fac3367-7b25-485d-80e9-1bde01a7c516",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "fd243c93-c170-4408-968b-fc65a263de33_ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "name": "NL-Line_1",
+      "networkElementId": "7f43f508-2496-4b64-9146-0a40406cbe49",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "ea6a5055-3108-4f86-bfd7-e1320a9473da",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "fd243c93-c170-4408-968b-fc65a263de33_cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "name": "NL-Line_1",
+      "networkElementId": "7f43f508-2496-4b64-9146-0a40406cbe49",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "cc276a2f-98f7-4927-8e85-1560af6e223d",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "fd243c93-c170-4408-968b-fc65a263de33_288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "name": "NL-Line_1",
+      "networkElementId": "7f43f508-2496-4b64-9146-0a40406cbe49",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "288ac5c2-128e-40cd-b5b2-d3d79779694c",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "fd243c93-c170-4408-968b-fc65a263de33_844e70d2-b39d-4093-9edc-ef931bc435db",
+      "name": "NL-Line_1",
+      "networkElementId": "7f43f508-2496-4b64-9146-0a40406cbe49",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "844e70d2-b39d-4093-9edc-ef931bc435db",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "fd243c93-c170-4408-968b-fc65a263de33_f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "name": "NL-Line_1",
+      "networkElementId": "7f43f508-2496-4b64-9146-0a40406cbe49",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "f38b9192-6064-4f1a-b2c6-5459ceb514b0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "fd243c93-c170-4408-968b-fc65a263de33_bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "name": "NL-Line_1",
+      "networkElementId": "7f43f508-2496-4b64-9146-0a40406cbe49",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "bea8e271-4901-4ddf-9a3a-b1d13f2bf2e0",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    },
+    {
+      "id": "fd243c93-c170-4408-968b-fc65a263de33_2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "name": "NL-Line_1",
+      "networkElementId": "7f43f508-2496-4b64-9146-0a40406cbe49",
+      "operator": "https://energy.referencedata.eu/EIC/10X1001A1001A361",
+      "thresholds": [
+        {
+          "unit": "megawatt",
+          "min": -350,
+          "max": 350,
+          "side": 1
+        }
+      ],
+      "contingencyId": "2f28d2b2-b37f-444b-8661-cb7375299b61",
+      "instant": "curative",
+      "optimized": true,
+      "monitored": false,
+      "nominalV": [
+        330.0
+      ]
+    }
+  ],
+  "networkActions": [
+    {
+      "id": "313d91f4-982f-4b35-be2f-c7664d37cee1",
+      "name": "ALT_NL-G3",
+      "operator": "",
+      "onInstantUsageRules": [
+        {
+          "usageMethod": "available",
+          "instant": "preventive"
+        },
+        {
+          "usageMethod": "available",
+          "instant": "curative"
+        }
+      ],
+      "topologicalActions": [
+        {
+          "networkElementId": "1dc9afba-23b5-41a0-8540-b479ed8baf4b",
+          "actionType": "open"
+        }
+      ]
+    },
+    {
+      "id": "6247d645-a81f-499d-a70a-ac7d343fec91",
+      "name": "ALT_NL-Line_3",
+      "operator": "",
+      "onInstantUsageRules": [
+        {
+          "usageMethod": "available",
+          "instant": "preventive"
+        },
+        {
+          "usageMethod": "available",
+          "instant": "curative"
+        }
+      ],
+      "topologicalActions": [
+        {
+          "networkElementId": "a279a3dc-550b-426c-af3a-61b7be508dcc",
+          "actionType": "open"
+        }
+      ]
+    },
+    {
+      "id": "6d7e823b-22f6-40a0-9ff9-da8c37d4b5bb",
+      "name": "ALT_BE-TR2_1",
+      "operator": "",
+      "onInstantUsageRules": [
+        {
+          "usageMethod": "available",
+          "instant": "preventive"
+        },
+        {
+          "usageMethod": "available",
+          "instant": "curative"
+        }
+      ],
+      "topologicalActions": [
+        {
+          "networkElementId": "a708c3bc-465d-4fe7-b6ef-6fa6408a62b0",
+          "actionType": "open"
+        }
+      ]
+    },
+    {
+      "id": "df956c8e-af25-410b-b94b-9985a27c6508",
+      "name": "ALT_BE-Line_2",
+      "operator": "",
+      "onInstantUsageRules": [
+        {
+          "usageMethod": "available",
+          "instant": "preventive"
+        },
+        {
+          "usageMethod": "available",
+          "instant": "curative"
+        }
+      ],
+      "topologicalActions": [
+        {
+          "networkElementId": "b58bf21a-096a-4dae-9a01-3f03b60c24c7",
+          "actionType": "open"
+        }
+      ]
+    }
+  ]
+}
