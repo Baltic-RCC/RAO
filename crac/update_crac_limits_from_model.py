@@ -2,10 +2,9 @@ import pandas
 import triplets
 import json
 
+import logging
+logger = logging.getLogger(__name__)
 
-CRAC_NAME = "TC1_example_crac.json"
-
-models = [r"../test-data/tests/test-data/TC1_CGMES.zip"]
 
 def get_limits(data):
 
@@ -36,74 +35,96 @@ def get_limits(data):
 
     return limits
 
-data = pandas.read_RDF(models)
+def update_limits(models, crac_to_update):
 
-limits = get_limits(data)
+    data = pandas.read_RDF(models)
 
-# Get voltages on terminals to convert A limits to MW
-limits = limits.merge(data.type_tableview("SvVoltage"), left_on="Terminal.TopologicalNode", right_on="SvVoltage.TopologicalNode", suffixes=("", "_SvVoltage"))
+    limits = get_limits(data)
 
-# Ensure that Active Power Limits column would be present
-if "ActivePowerLimit.value" not in limits.columns:
-    limits["ActivePowerLimit.value"] = pandas.NA
+    # Get voltages on terminals to convert A limits to MW
+    limits = limits.merge(data.type_tableview("SvVoltage"), left_on="Terminal.TopologicalNode", right_on="SvVoltage.TopologicalNode", suffixes=("", "_SvVoltage"))
 
-# Compute MW approximation where ActivePowerLimit is NaN and Current/Voltage are available
-if "CurrentLimit.value" in limits.columns and "SvVoltage.v" in limits.columns:
-    condition = limits["ActivePowerLimit.value"].isna() & limits["CurrentLimit.value"].notna() & limits["SvVoltage.v"].notna()
-    # Calculate MW and assign
-    limits.loc[condition, "ActivePowerLimit.value"] = round(3**0.5 * limits.loc[condition, "CurrentLimit.value"] * limits.loc[condition, "SvVoltage.v"] / 1000, 1)
+    # Ensure that Active Power Limits column would be present
+    if "ActivePowerLimit.value" not in limits.columns:
+        limits["ActivePowerLimit.value"] = pandas.NA
 
-
-patl_limits = limits[limits["OperationalLimitType.kind"].str.endswith(".patl")].groupby("ID_Equipment")
-tatl_limits = limits[limits["OperationalLimitType.kind"].str.endswith(".tatl")].groupby("ID_Equipment")
-
-# Generate mean voltages for equipment
-voltages = patl_limits["SvVoltage.v"].mean().round(1).to_dict()
-
-patl_current_limits = {}
-tatl_current_limits = {}
-if "CurrentLimit.value" in limits.columns:
-    patl_current_limits = patl_limits["CurrentLimit.value"].min().to_dict()
-    tatl_current_limits = tatl_limits["CurrentLimit.value"].min().to_dict()
-
-patl_power_limits = {}
-tatl_power_limits = {}
-if "ActivePowerLimit.value" in limits.columns:
-    patl_power_limits = patl_limits["ActivePowerLimit.value"].min().to_dict()
-    tatl_power_limits = tatl_limits["ActivePowerLimit.value"].min().to_dict()
+    # Compute MW approximation where ActivePowerLimit is NaN and Current/Voltage are available
+    if "CurrentLimit.value" in limits.columns and "SvVoltage.v" in limits.columns:
+        condition = limits["ActivePowerLimit.value"].isna() & limits["CurrentLimit.value"].notna() & limits["SvVoltage.v"].notna()
+        # Calculate MW and assign
+        limits.loc[condition, "ActivePowerLimit.value"] = round(3**0.5 * limits.loc[condition, "CurrentLimit.value"] * limits.loc[condition, "SvVoltage.v"] / 1000, 1)
 
 
-if isinstance(CRAC_NAME, str):
-   with open(CRAC_NAME, "r") as file_object:
-       crac = json.load(file_object)
+    patl_limits = limits[limits["OperationalLimitType.kind"].str.endswith(".patl")].groupby("ID_Equipment")
+    tatl_limits = limits[limits["OperationalLimitType.kind"].str.endswith(".tatl")].groupby("ID_Equipment")
 
-for position, monitored_element in enumerate(crac['flowCnecs']):
+    # Generate mean voltages for equipment
+    voltages = patl_limits["SvVoltage.v"].mean().round(1).to_dict()
 
-    # Set nominal voltage to operational voltages, taken from SV
-    if operational_voltage := voltages.get(monitored_element['networkElementId']):
-        crac['flowCnecs'][position]['nominalV'] = [operational_voltage]
+    patl_current_limits = {}
+    tatl_current_limits = {}
+    if "CurrentLimit.value" in limits.columns:
+        patl_current_limits = patl_limits["CurrentLimit.value"].min().to_dict()
+        tatl_current_limits = tatl_limits["CurrentLimit.value"].min().to_dict()
 
-    current_limits = patl_current_limits
-    power_limits = patl_power_limits
-
-    if monitored_element["instant"] == "curative":
-
-        current_limits = tatl_current_limits
-        power_limits = tatl_power_limits
-
-    if limit := power_limits.get(monitored_element['networkElementId']):
-        unit = "megawatt"
-    elif limit := current_limits.get(monitored_element['networkElementId']):
-        unit = "ampere"
-    else:
-        print(f"Limit not found for {monitored_element['networkElementId']}")
-        continue
-
-    crac['flowCnecs'][position]['thresholds'] = [{'max': limit, 'min': limit *-1, 'side': 1, 'unit': unit}]
+    patl_power_limits = {}
+    tatl_power_limits = {}
+    if "ActivePowerLimit.value" in limits.columns:
+        patl_power_limits = patl_limits["ActivePowerLimit.value"].min().to_dict()
+        tatl_power_limits = tatl_limits["ActivePowerLimit.value"].min().to_dict()
 
 
-with open(CRAC_NAME, "w") as file_object:
-    json.dump(crac, file_object, sort_keys=False, indent=2)
-    print(f"Updated Flow limits and Nominal Voltages in {CRAC_NAME}")
+    # Load crac that is to be updated
+    if isinstance(crac_to_update, str):
+       with open(crac_to_update, "r") as file_object:
+           crac = json.load(file_object)
+
+    if isinstance(crac_to_update, dict):
+        crac = crac_to_update
+
+    for position, monitored_element in enumerate(crac['flowCnecs']):
+
+        # Set nominal voltage to operational voltages, taken from SV
+        if operational_voltage := voltages.get(monitored_element['networkElementId']):
+            crac['flowCnecs'][position]['nominalV'] = [operational_voltage]
+
+        current_limits = patl_current_limits
+        power_limits = patl_power_limits
+
+        if monitored_element["instant"] == "curative":
+
+            current_limits = tatl_current_limits
+            power_limits = tatl_power_limits
+
+        if limit := power_limits.get(monitored_element['networkElementId']):
+            unit = "megawatt"
+        elif limit := current_limits.get(monitored_element['networkElementId']):
+            unit = "ampere"
+        else:
+            logger.warning(f"Limit not found for {monitored_element['networkElementId']}")
+            continue
+
+        crac['flowCnecs'][position]['thresholds'] = [{'max': limit, 'min': limit *-1, 'side': 1, 'unit': unit}]
+
+    return crac
+
+if __name__ == "__main__":
+
+    logging.basicConfig(
+        level=logging.INFO,  # Set the minimum logging level
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",  # Log message format
+    )
+
+    CRAC_NAME = "TC1_example_crac.json"
+    MODELS = [r"../test-data/tests/test-data/TC1_CGMES.zip"]
+
+    with open(CRAC_NAME, "r") as file_object:
+        crac_to_update = json.load(file_object)
+
+    updated_crac = update_limits(MODELS, crac_to_update)
+
+    with open(CRAC_NAME, "w") as file_object:
+        json.dump(updated_crac, file_object, sort_keys=False, indent=2)
+        logger.info(f"Updated Flow limits and Nominal Voltages in {CRAC_NAME}")
 
 
