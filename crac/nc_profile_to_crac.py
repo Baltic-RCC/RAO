@@ -16,16 +16,18 @@ rao_data = pandas.read_RDF([PATH_ASSESSED_ELEMENTS, PATH_CONTINGENCIES, PATH_REM
 for key, value in rao_data.types_dict().items():
     print(f"Loaded {value} {key}")
 
-
+# Assessed Elements
 assessed_elements = rao_data.type_tableview("AssessedElement", string_to_number=False)
-#assessed_elements_df = assessed_elements_df[~assessed_elements_df.eq_type.isin(['transformer', 'tieline'])]
 
+# Contingencies
 contingency_equipment = rao_data.type_tableview("ContingencyEquipment", string_to_number=False)
 contingencies = rao_data.key_tableview("Contingency.EquipmentOperator", string_to_number=False)
 contingencies = contingencies.merge(contingency_equipment, left_on="IdentifiedObject.mRID", right_on="ContingencyElement.Contingency", suffixes=("_ContingencyElement", "_ContingencyEquipment"))
 
-
-remedial_actions = rao_data.type_tableview("TopologyAction", string_to_number=False)
+# Remedial Actions
+grid_state_alteration = rao_data.key_tableview("GridStateAlteration.GridStateAlterationRemedialAction", string_to_number=False)
+remedial_actions = rao_data.type_tableview("GridStateAlterationRemedialAction", string_to_number=False)
+remedial_actions = remedial_actions.merge(grid_state_alteration, left_on="IdentifiedObject.mRID", right_on="GridStateAlteration.GridStateAlterationRemedialAction", suffixes=("_GridStateAlterationRemedialAction", "_GridStateAlteration"))
 
 
 crac = {
@@ -102,30 +104,47 @@ for contingency_mRID, contingency_data in contingencies.groupby("IdentifiedObjec
     }
     crac['contingencies'].append(contingency)
 
-for ra in remedial_actions.to_dict('records'):
+for remedial_action_mRID, remedial_action_data in remedial_actions.groupby("IdentifiedObject.mRID_GridStateAlterationRemedialAction"):
+
     remedial_action = {
-      "id": ra['IdentifiedObject.mRID'],
-      "name": ra['IdentifiedObject.name'],
-      "operator": "",  # TODO - get from EQ, if needed?
+      "id": remedial_action_data['IdentifiedObject.mRID_GridStateAlterationRemedialAction'].iloc[0],
+      "name": remedial_action_data['IdentifiedObject.name_GridStateAlterationRemedialAction'].iloc[0],
+      "operator": remedial_action_data['RemedialAction.RemedialActionSystemOperator'].iloc[0],
       "onInstantUsageRules": [
+        # {
+        #     "usageMethod": "available",
+        #     "instant": "preventive"
+        # },
+        # {
+        #     "usageMethod": "available",
+        #     "instant": "curative"
+        # },
         {
-            "usageMethod": "available",
-            "instant": "preventive"
-        },
-        {
-            "usageMethod": "available",
-            "instant": "curative"
+             "usageMethod": "available",
+             "instant": remedial_action_data["RemedialAction.kind"].iloc[0].split(".")[-1]
         }
       ],
       "topologicalActions": [
-        {
-            "networkElementId": ra["TopologyAction.Equipment"],
-            "actionType": "open"  # TODO - operation mapping
-        }
+
       ]
     }
+
+    for action in remedial_action_data.to_dict("records"):
+
+        topology_action_id = action.get("TopologyAction.Equipment")
+
+        if topology_action_id:
+            remedial_action["topologicalActions"].append(
+                {
+                    "networkElementId": topology_action_id,
+                    "actionType": "open"  # TODO - operation mapping
+                }
+        )
+
+
     crac['networkActions'].append(remedial_action)
 
 with open(EXPORT_CRAC_NAME, "w") as file_object:
     json.dump(crac, file_object, sort_keys=False, indent=2)
+    print(f"Created {EXPORT_CRAC_NAME}")
 
