@@ -40,10 +40,25 @@ data = pandas.read_RDF(models)
 
 limits = get_limits(data)
 
+# Get voltages on terminals to convert A limits to MW
+limits = limits.merge(data.type_tableview("SvVoltage"), left_on="Terminal.TopologicalNode", right_on="SvVoltage.TopologicalNode", suffixes=("", "_SvVoltage"))
+
+# Ensure that Active Power Limits column would be present
+if "ActivePowerLimit.value" not in limits.columns:
+    limits["ActivePowerLimit.value"] = pandas.NA
+
+# Compute MW approximation where ActivePowerLimit is NaN and Current/Voltage are available
+if "CurrentLimit.value" in limits.columns and "SvVoltage.v" in limits.columns:
+    condition = limits["ActivePowerLimit.value"].isna() & limits["CurrentLimit.value"].notna() & limits["SvVoltage.v"].notna()
+    # Calculate MW and assign
+    limits.loc[condition, "ActivePowerLimit.value"] = round(3**0.5 * limits.loc[condition, "CurrentLimit.value"] * limits.loc[condition, "SvVoltage.v"] / 1000, 1)
+
 
 patl_limits = limits[limits["OperationalLimitType.kind"].str.endswith(".patl")].groupby("ID_Equipment")
 tatl_limits = limits[limits["OperationalLimitType.kind"].str.endswith(".tatl")].groupby("ID_Equipment")
 
+# Generate mean voltages for equipment
+voltages = patl_limits["SvVoltage.v"].mean().round(1).to_dict()
 
 patl_current_limits = {}
 tatl_current_limits = {}
@@ -57,15 +72,16 @@ if "ActivePowerLimit.value" in limits.columns:
     patl_power_limits = patl_limits["ActivePowerLimit.value"].min().to_dict()
     tatl_power_limits = tatl_limits["ActivePowerLimit.value"].min().to_dict()
 
-# TODO convert all limits to Active power limits
-# 1. Find equipment base voltage
-# 2. Find avergae voltage setpoint on given base voltage (find all terminals regulating control on given base voltage)
 
 if isinstance(CRAC_NAME, str):
    with open(CRAC_NAME, "r") as file_object:
        crac = json.load(file_object)
 
 for position, monitored_element in enumerate(crac['flowCnecs']):
+
+    # Set nominal voltage to operational voltages, taken from SV
+    if operational_voltage := voltages.get(monitored_element['networkElementId']):
+        crac['flowCnecs'][position]['nominalV'] = [operational_voltage]
 
     current_limits = patl_current_limits
     power_limits = patl_power_limits
@@ -88,5 +104,6 @@ for position, monitored_element in enumerate(crac['flowCnecs']):
 
 with open(CRAC_NAME, "w") as file_object:
     json.dump(crac, file_object, sort_keys=False, indent=2)
+    print(f"Updated Flow limits and Nominal Voltages in {CRAC_NAME}")
 
 
