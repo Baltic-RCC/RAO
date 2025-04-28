@@ -1,0 +1,11 @@
+[project]
+name = "rao"
+version = "0.1.0"
+description = "Baltic RCC RAO implementation"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2.3",
+    "pypowsybl>=1.11.0",
+    "triplets>=0.0.8",
+]
