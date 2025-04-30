@@ -1,0 +1,19 @@
+sync-with-github:
+  stage: build
+  # Using container with trusted certificates
+  image: $ARTIFACTORY_URL/build-containers/alpine:ssh
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  script:
+    - export ALPINE_REPO="https://${ARTIFACTORY_URL}:443/artifactory/alpine/v3.12"
+    - |
+      cat <<EOF > /etc/apk/repositories
+      ${ALPINE_REPO}/main
+      ${ALPINE_REPO}/community
+      EOF
+    # Perform synchronization
+    - apk add --no-cache git
+    - git clone --bare https://github.com/Baltic-RCC/RAO.git
+    - cd RAO.git
+    - git config http.sslVerify false
+    - git push --mirror https://$USERNAME:$ACCESS_TOKEN@$REPOSITORY_URL
