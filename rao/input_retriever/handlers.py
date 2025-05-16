@@ -24,7 +24,7 @@ class HandlerMetadataToObjectStorage:
 
         # Store body content in BytesIO
         content = BytesIO(message)
-        content.name = f"{headers['baMessageID']}.xml"
+        content.name = f"{properties.headers['messageID']}.xml"
 
         # Load content to triplestore
         data = triplets.rdf_parser.load_RDF_to_dataframe(content)
@@ -41,12 +41,13 @@ class HandlerMetadataToObjectStorage:
         # Upload payload to S3 storage
         ## Update content object name
         _keyword = metadata_object.get("keyword", "UNDEFINED")
+        _version = metadata_object.get("Model.version", "UNDEFINED")
         _publisher = metadata_object.get("publisher", "UNDEFINED")
         if _publisher != "UNDEFINED":
             _publisher = _publisher.split("/")[-1]
         _start_date = metadata_object.get("startDate", "UNDEFINED")
         _end_date = metadata_object.get("endDate", "UNDEFINED")
-        content.name = f"{S3_BUCKET_OUT_PREFIX}/{_keyword}_{_publisher}_{_start_date}_{_end_date}.xml"
+        content.name = f"{S3_BUCKET_OUT_PREFIX}/{_keyword}_{_version}_{_publisher}_{_start_date}_{_end_date}.xml"
         self.s3_service.upload_object(
             file_path_or_file_object=content,
             bucket_name=S3_BUCKET_OUT,

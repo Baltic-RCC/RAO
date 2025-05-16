@@ -1,15 +1,14 @@
 import datetime
-import logging
 import pandas
 import sys
 import config
 from typing import List, Dict
 from io import BytesIO
+from loguru import logger
 from rao.common.config_parser import parse_app_properties
 from rao.integrations.s3_storage import S3Minio
 from rao.integrations.elastic import Elastic
 
-logger = logging.getLogger(__name__)
 
 parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
 
@@ -87,15 +86,11 @@ class ObjectStorage:
             metadata (dict): A dictionary containing metadata information.
 
         Returns:
-            list: A list of dictionaries representing content components with updated 'DATA' field.
-
-        Note:
-            It expects metadata to contain 'opde:Component' information.
-            For each component, it downloads data from MinIO and updates the 'DATA' field in the component dictionary.
+            bytes: Content object in BytesIO format
         """
 
         logger.info(f"Getting content of metadata object from MinIO: {metadata['identifier']}")
-        bucket_name = metadata.get("content-bucket", "pdn-data")  # by default use "opdm-data" bucket if missing in meta
+        bucket_name = metadata.get("content-bucket", "pdn-data")  # by default use "pdn-data" bucket if missing in meta
         logger.debug(f"S3 storage bucket used: {bucket_name}")
         content_reference = metadata.get("content-reference")
         logger.info(f"Downloading object: {content_reference}")
