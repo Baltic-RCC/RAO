@@ -11,7 +11,6 @@ from rao.common.config_parser import parse_app_properties
 
 logger = logging.getLogger(__name__)
 
-parse_app_properties(caller_globals=globals(), path=config.paths.input_retriever.input_retriever)
 parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
 
 

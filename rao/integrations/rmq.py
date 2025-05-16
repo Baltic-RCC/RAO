@@ -1,15 +1,14 @@
 import functools
 import time
-import logging
 import pika
 import config
 from typing import List
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from loguru import logger
+from rao.common.config_parser import parse_app_properties
 
-# Initialize logger
-logger = logging.getLogger(__name__)
 
-parse_app_properties(globals(), config.paths.integrations.rabbit)
+parse_app_properties(globals(), config.paths.integrations.rmq)
 
 
 class BlockingClient:
