@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "elasticsearch==8.11.0",
+    "loguru>=0.7.3",
     "minio>=7.2.15",
     "ndjson>=0.3.1",
     "pandas>=2.2.3",
@@ -16,4 +17,16 @@ dependencies = [
     "setuptools>=80.4.0",
     "triplets>=0.0.8",
     "typing-extensions>=4.13.2",
+    "uv>=0.7.3",
 ]
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+
+[[tool.uv.index]]
+name = "local-pypi"
+url = "https://artifactory.elering.sise/artifactory/api/pypi/pssepip/simple"
+
+[tool.uv]
+allow-insecure-host = ["artifactory.elering.sise"]

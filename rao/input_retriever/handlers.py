@@ -5,19 +5,20 @@ import uuid
 from datetime import datetime
 from io import BytesIO
 import config
-from rao.integrations.s3_storage import ObjectStorage
+from rao.integrations.s3_storage import S3Minio
 from rao.integrations.elastic import Elastic
 from rao.common.config_parser import parse_app_properties
 
 logger = logging.getLogger(__name__)
 
 parse_app_properties(caller_globals=globals(), path=config.paths.input_retriever.input_retriever)
+parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
 
 
 class HandlerMetadataToObjectStorage:
 
     def __init__(self):
-        self.s3_service = ObjectStorage()
+        self.s3_service = S3Minio()
         self.elastic_service = Elastic()
 
     def handle(self, message: bytes, properties: BasicProperties,  **kwargs):
@@ -46,7 +47,7 @@ class HandlerMetadataToObjectStorage:
             _publisher = _publisher.split("/")[-1]
         _start_date = metadata_object.get("startDate", "UNDEFINED")
         _end_date = metadata_object.get("endDate", "UNDEFINED")
-        content.name = f"{S3_BUCKET_OUT_PREFIX}/{_keyword}_{_publisher}_{_start_date}_{_end_date}/"
+        content.name = f"{S3_BUCKET_OUT_PREFIX}/{_keyword}_{_publisher}_{_start_date}_{_end_date}.xml"
         self.s3_service.upload_object(
             file_path_or_file_object=content,
             bucket_name=S3_BUCKET_OUT,
@@ -54,6 +55,8 @@ class HandlerMetadataToObjectStorage:
         )
 
         # Send metadata object to Elastic
+        metadata_object["content-bucket"] = S3_BUCKET_OUT
+        metadata_object["content-reference"] = content.name
         self.elastic_service.send_to_elastic(
             index=ELASTIC_INDEX,
             json_message=metadata_object,
@@ -85,7 +88,7 @@ if __name__ == '__main__':
         timestamp=1747208205,
         headers=headers,
     )
-    with open(r"C:\Users\martynas.karobcikas\Downloads\rcc_test_upload.xml", "rb") as file:
+    with open(r"C:\Users\martynas.karobcikas\Downloads\rcc-test-upload.xml", "rb") as file:
         file_bytes = file.read()
 
     # Create instance

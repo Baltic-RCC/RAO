@@ -31,7 +31,7 @@ def renew_authentication_token(func):
     return wrapper
 
 
-class ObjectStorage:
+class S3Minio:
 
     def __init__(self, server: str = MINIO_SERVER, username: str = MINIO_USERNAME, password: str = MINIO_PASSWORD):
         self.server = server
