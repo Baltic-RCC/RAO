@@ -5,9 +5,9 @@ import config
 from typing import List, Dict
 from io import BytesIO
 from loguru import logger
-from rao.common.config_parser import parse_app_properties
-from rao.integrations.s3_storage import S3Minio
-from rao.integrations.elastic import Elastic
+from common.config_parser import parse_app_properties
+from integrations.s3_storage import S3Minio
+from integrations.elastic import Elastic
 
 
 parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)

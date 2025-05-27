@@ -3,8 +3,7 @@ import logging
 import os
 import ast
 from typing import Dict, Any
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 def parse_app_properties(caller_globals: Dict[str, Any],

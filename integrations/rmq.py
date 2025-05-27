@@ -3,9 +3,9 @@ import time
 import pika
 import config
 from typing import List
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from loguru import logger
-from rao.common.config_parser import parse_app_properties
+from common.config_parser import parse_app_properties
 
 
 parse_app_properties(globals(), config.paths.integrations.rmq)

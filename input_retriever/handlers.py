@@ -1,15 +1,13 @@
-import logging
 import triplets
 from pika import BasicProperties
 import uuid
 from datetime import datetime
 from io import BytesIO
 import config
-from rao.integrations.s3_storage import S3Minio
-from rao.integrations.elastic import Elastic
-from rao.common.config_parser import parse_app_properties
-
-logger = logging.getLogger(__name__)
+from loguru import logger
+from integrations.s3_storage import S3Minio
+from integrations.elastic import Elastic
+from common.config_parser import parse_app_properties
 
 parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
 

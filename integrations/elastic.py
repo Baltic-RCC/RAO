@@ -8,7 +8,7 @@ import uuid
 from typing import List, Dict
 from elasticsearch import Elasticsearch
 import config
-from rao.common.config_parser import parse_app_properties
+from common.config_parser import parse_app_properties
 
 import warnings
 from elasticsearch.exceptions import ElasticsearchWarning

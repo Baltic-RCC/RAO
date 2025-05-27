@@ -1,0 +1,9 @@
+.idea
+.venv
+.git
+.github
+**/Dockerfile
+README.md
+LICENSE
+.gitlab-ci.yml
+.gitignore

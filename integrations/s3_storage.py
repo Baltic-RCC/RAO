@@ -11,7 +11,7 @@ import functools
 from io import BytesIO
 from datetime import datetime, timedelta
 from aniso8601 import parse_datetime
-from rao.common.config_parser import parse_app_properties
+from common.config_parser import parse_app_properties
 
 urllib3.disable_warnings()
 
