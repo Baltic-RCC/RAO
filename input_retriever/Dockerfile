@@ -20,6 +20,6 @@ COPY input_retriever/ ./input_retriever/
 
 # Start process
 ENV PYTHONPATH="${PYTHONPATH}:/app"
-#ENTRYPOINT ["python"]
-#CMD ["worker.py"]
-ENTRYPOINT ["/bin/bash"]
+ENTRYPOINT ["python"]
+CMD ["input_retriever/worker.py"]
+#ENTRYPOINT ["/bin/bash"]
