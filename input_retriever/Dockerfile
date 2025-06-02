@@ -3,6 +3,7 @@ FROM python:3.11-slim
 #FROM --platform=linux/amd64 python:3.11-slim
 
 # Install tools to set up python environment
+RUN apt-get update && apt-get install -y --no-install-recommends procps && rm -rf /var/lib/apt/lists/*
 RUN pip install --upgrade setuptools pip uv
 
 # Set working directory
