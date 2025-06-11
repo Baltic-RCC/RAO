@@ -99,17 +99,18 @@ class ObjectStorage:
         return content
 
     def get_latest_data(self,
-                        type_keyword: str,
-                        publisher: List,
+                        type_keyword: List,
                         scenario_timestamp: str | datetime.datetime,
+                        entity: List | None = None,
                         ):
 
         logger.info(f"Retrieving input data files of keyword: {type_keyword}")
 
         # Build Elastic query from given scenario_timestamp and metadata
-        metadata_query = {"keyword": type_keyword,
-                          "publisher": publisher,
-                          }
+        metadata_query = {"keyword": type_keyword}
+        if entity:
+            metadata_query['entity'] = entity
+
         range_query = [
             {"range": {"startDate": {"lte": scenario_timestamp.isoformat()}}},
             {"range": {"endDate": {"gte": scenario_timestamp.isoformat()}}},
@@ -124,12 +125,12 @@ class ObjectStorage:
         if files_metadata:
             # Sort by latest version
             df = pandas.DataFrame(files_metadata)
-            df = df.sort_values(by="Model.version", ascending=True).groupby("publisher").first()
+            df = df.sort_values(by="Model.version", ascending=True).groupby("entity").first()
 
             for file_object in df.to_dict("records"):
                 try:
                     files_downloaded.append(self.get_content(metadata=file_object))
-                except Exception as E:
+                except Exception as e:
                     logger.error(f"Could not download file for: {file_object}")
                     logger.error(sys.exc_info())
         else:
@@ -139,10 +140,7 @@ class ObjectStorage:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(stream=sys.stdout,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                        level=logging.INFO)
-
+    # Test script to run ObjectStorage methods
     test_query = {"keyword": "CO",
                   "publisher": ["https://energy.referencedata.eu/EIC/38X-BALTIC-RSC-H"],
                   }
@@ -151,8 +149,8 @@ if __name__ == "__main__":
     # response = service.query(metadata_query=test_query, return_payload=True)
     # Test 2
     latest_files = service.get_latest_data(
-        publisher=["https://energy.referencedata.eu/EIC/38X-BALTIC-RSC-H"],
-        type_keyword="CO",
+        entity=["LITGRID"],
+        type_keyword=["CO"],
         scenario_timestamp=datetime.datetime(2025, 5, 13, 10, 30)
     )
     logger.info("Test script finished")

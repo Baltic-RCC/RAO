@@ -1,16 +1,13 @@
 import pypowsybl as pp
 from typing import Dict
-import logging
 import sys
 import pandas as pd
 from datetime import datetime
 import time
+import logging
 from loadflow_settings import LF_PARAMETERS
 from helper import repackage_model_zip
-
-
-# Start logger
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class Optimizer:
@@ -46,7 +43,7 @@ class Optimizer:
     def cost_results(self):
         return pd.json_normalize(self.results.to_json()['costResults'])
 
-    def load_parameters(self, path: str = r"parameters.json"):
+    def load_parameters(self, path: str = r"parameters_v24.json"):
         self.parameters = pp.rao.Parameters()
         self.parameters.load_from_file_source(parameters_file=path)
 
@@ -74,11 +71,6 @@ class Optimizer:
 
 if __name__ == '__main__':
     # Testing
-    logging.basicConfig(stream=sys.stdout,
-                        format="%(levelname) -10s %(asctime) -10s %(name) -35s %(funcName) -35s %(lineno) -5d: %(message)s",
-                        datefmt="%Y-%m-%d %H:%M:%S",
-                        level=20,
-                        )
     logging.getLogger('powsybl').setLevel(20)
 
     # Define the network
