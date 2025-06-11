@@ -12,6 +12,7 @@ dependencies = [
     "pandas>=2.2.3",
     "pika>=1.3.2",
     "pip>=25.1.1",
+    "pydantic>=2.11.5",
     "pypowsybl>=1.11.0",
     "requests>=2.32.3",
     "setuptools>=80.4.0",
