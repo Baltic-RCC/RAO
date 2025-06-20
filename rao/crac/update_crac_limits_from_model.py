@@ -1,9 +1,7 @@
 import pandas
 import triplets
 import json
-
-import logging
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 def get_limits(data):
@@ -54,9 +52,8 @@ def update_limits(models, crac_to_update):
         # Calculate MW and assign
         limits.loc[condition, "ActivePowerLimit.value"] = round(3**0.5 * limits.loc[condition, "CurrentLimit.value"] * limits.loc[condition, "SvVoltage.v"] / 1000, 1)
 
-
-    patl_limits = limits[limits["OperationalLimitType.kind"].str.endswith(".patl")].groupby("ID_Equipment")
-    tatl_limits = limits[limits["OperationalLimitType.kind"].str.endswith(".tatl")].groupby("ID_Equipment")
+    patl_limits = limits[limits["OperationalLimitType.limitType"].str.endswith(".patl")].groupby("ID_Equipment")
+    tatl_limits = limits[limits["OperationalLimitType.limitType"].str.endswith(".tatl")].groupby("ID_Equipment")
 
     # Generate mean voltages for equipment
     voltages = patl_limits["SvVoltage.v"].mean().round(1).to_dict()
@@ -73,7 +70,6 @@ def update_limits(models, crac_to_update):
         patl_power_limits = patl_limits["ActivePowerLimit.value"].min().to_dict()
         tatl_power_limits = tatl_limits["ActivePowerLimit.value"].min().to_dict()
 
-
     # Load crac that is to be updated
     if isinstance(crac_to_update, str):
        with open(crac_to_update, "r") as file_object:
@@ -84,9 +80,14 @@ def update_limits(models, crac_to_update):
 
     for position, monitored_element in enumerate(crac['flowCnecs']):
 
+        # Handle leading underscore in Crac file
+        if monitored_element['networkElementId'].startswith("_"):
+            monitored_element['networkElementId'] = monitored_element['networkElementId'][1:]
+
         # Set nominal voltage to operational voltages, taken from SV
         if operational_voltage := voltages.get(monitored_element['networkElementId']):
             crac['flowCnecs'][position]['nominalV'] = [operational_voltage]
+            logger.debug(f"Flow CNEC {monitored_element['name']} nominal voltage updated: {operational_voltage}")
 
         current_limits = patl_current_limits
         power_limits = patl_power_limits
@@ -104,16 +105,11 @@ def update_limits(models, crac_to_update):
             logger.warning(f"Limit not found for {monitored_element['networkElementId']}")
             continue
 
-        crac['flowCnecs'][position]['thresholds'] = [{'max': limit, 'min': limit *-1, 'side': 1, 'unit': unit}]
+        crac['flowCnecs'][position]['thresholds'] = [{'max': limit, 'min': limit * -1, 'side': 1, 'unit': unit}]
 
     return crac
 
 if __name__ == "__main__":
-
-    logging.basicConfig(
-        level=logging.INFO,  # Set the minimum logging level
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",  # Log message format
-    )
 
     CRAC_NAME = "TC1_example_crac.json"
     MODELS = [r"../test-data/tests/test-data/TC1_CGMES.zip"]

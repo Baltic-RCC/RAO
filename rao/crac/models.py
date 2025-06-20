@@ -102,7 +102,7 @@ class Crac(BaseModel):
     ra_usage_limits_per_instant: List[Any] = Field(default_factory=list)
     networkElementsNamePerId: Dict = Field(default_factory=dict)
     contingencies: List[Contingency] = Field(default_factory=list)
-    flowCnecs: List[Dict] = Field(default_factory=list)
+    flowCnecs: List[FlowCnec] = Field(default_factory=list)
     networkActions: List[NetworkAction] = Field(default_factory=list)
 
 

@@ -3,12 +3,19 @@ from datetime import datetime
 from pika import BasicProperties
 import config
 from io import BytesIO
-from loguru import logger
 import pandas as pd
+import json
+import pypowsybl
+from pathlib import Path
 from common.object_storage import ObjectStorage
 from integrations.elastic import Elastic
 from common.config_parser import parse_app_properties
 from rao.crac_builder import CracBuilder
+from rao.crac.update_crac_limits_from_model import update_limits
+from rao.optimizer import Optimizer
+from rao.loadflow_tool_settings import CGMES_IMPORT_PARAMETERS
+from loguru import logger
+
 
 parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
 
@@ -24,15 +31,21 @@ class HandlerVirtualOperator:
 
         # Metadata
         self.scenario_timestamp = None
+        self.network_model_meta = None
 
     def get_input_profiles(self):
-        content = self.object_storage.get_latest_data(type_keyword=["CO", "AE", "RA"],
-                                                      scenario_timestamp=self.scenario_timestamp)
+        content = self.object_storage.get_latest_input_data(type_keyword=["CO", "AE", "RA"],
+                                                            scenario_timestamp=self.scenario_timestamp)
 
         return content
 
-    def network_model(self):
-        pass
+    def get_network_model(self, content_reference: str):
+        # Query merge reports
+        metadata = {'content_reference': content_reference}
+        self.network_model_meta = self.object_storage.query(metadata_query=metadata, index=ELASTIC_MODELS_INDEX)[0]
+        content = self.object_storage.get_content(metadata=self.network_model_meta, bucket_name=S3_BUCKET_IN_MODELS)
+
+        return content
 
     def handle(self, message: bytes, properties: dict, **kwargs):
         """
@@ -40,27 +53,33 @@ class HandlerVirtualOperator:
         """
 
         # Get metadata from properties
-        self.scenario_timestamp = properties.headers.get("@scenario_timestamp", None)
+        self.scenario_timestamp = getattr(properties, 'headers').get('scenario_time', None)
 
         # Store SAR to BytesIO object
         sar = BytesIO(message)
-        sar.name = f"{properties.headers['messageID']}.xml"
+        sar.name = f"{getattr(properties, 'headers').get('project_name', 'undefined')}.xml"
 
         # Get other input data from object storage
         input_file_objects = self.get_input_profiles()
 
         # Get network model from object storage
-        pass
+        content_reference = properties.headers.get('content_reference', None)
+        if not content_reference:
+            logger.error(f"RMQ message does not have content reference in headers")
+            return
+        network_model = self.get_network_model(content_reference=content_reference)
+        network = pypowsybl.network.load_from_binary_buffer(
+            buffer=network_model,
+            parameters=CGMES_IMPORT_PARAMETERS
+        )
 
         # Load input files to triplets
-        file_to_load = [sar, input_file_objects]
-        data = pd.read_RDF(file_to_load)
-
+        data = pd.read_RDF([sar] + input_file_objects)
         for key, value in data.types_dict().items():
-            logger.info(f"Loaded objects: {value} {key}")  # TODO might be changes to debug
+            logger.debug(f"Loaded objects: {value} {key}")
 
         # Get all violations from SAR profile
-        violations = self.data.key_tableview("PowerFlowResult.isViolation")
+        violations = data.key_tableview("PowerFlowResult.isViolation")
         violations = violations[violations['PowerFlowResult.isViolation'] == 'true']
         if violations.empty:
             logger.warning("No violations found in SAR profile, exiting CRAC building process")
@@ -72,9 +91,15 @@ class HandlerVirtualOperator:
         for mrid, data in violations.groupby("ContingencyPowerFlowResult.Contingency"):
             logger.info(f"Processing contingency: {mrid} with {len(data)} violations")
             # Build CRAC for each contingency
-            crac_file = crac_service.build_crac()
+            crac_file = crac_service.build_crac(contingency_ids=[mrid])
 
-            # TODO update CRAC with limits from model
+            # Update CRAC file with limits from network model
+            modified_crac = update_limits(models=network_model, crac_to_update=crac_file)
+
+            # Start the optimization
+            crac_object = BytesIO(json.dumps(modified_crac).encode('utf-8'))
+            optimizer = Optimizer(network=network, crac=crac_object)
+            optimizer.run()
 
         logger.info(f"Finished")
 
@@ -90,6 +115,7 @@ if __name__ == '__main__':
         "sender": "TSOX",
         "senderApplication": "APPX",
         "service": "INPUT-DATA",
+        "@scenario_timestamp": datetime(2025, 6, 2, 10, 30)
     }
     properties = BasicProperties(
         content_type='application/octet-stream',

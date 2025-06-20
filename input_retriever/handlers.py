@@ -53,10 +53,10 @@ class HandlerMetadataToObjectStorage:
         )
 
         # Send metadata object to Elastic
-        metadata_object["content-bucket"] = S3_BUCKET_OUT
-        metadata_object["content-reference"] = content.name
+        metadata_object["content_bucket"] = S3_BUCKET_OUT
+        metadata_object["content_reference"] = content.name
         self.elastic_service.send_to_elastic(
-            index=ELASTIC_INDEX,
+            index=ELASTIC_METADATA_INDEX,
             json_message=metadata_object,
             id=metadata_object.get('identifier', None)
         )

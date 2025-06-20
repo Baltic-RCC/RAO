@@ -15,7 +15,7 @@ class CracBuilder:
     This class is a placeholder and can be extended with specific pre-processing methods.
     """
 
-    def __init__(self, data: pd.Dataframe):
+    def __init__(self, data: pd.DataFrame):
         logger.info(f"PreProcessor initialized with configuration")
         self.data = data
         self._crac = None
@@ -34,7 +34,7 @@ class CracBuilder:
     def process_contingencies(self, specific_contingencies: list | None = None):
 
         contingency_equipment = self.data.type_tableview("ContingencyEquipment", string_to_number=False)
-        contingencies = self.data.key_tableview("Contingency.EquipmentOperator", string_to_number=False)
+        contingencies = self.data.key_tableview("Contingency.normalMustStudy", string_to_number=False)
         contingencies = contingencies.merge(contingency_equipment,
                                             left_on="IdentifiedObject.mRID",
                                             right_on="ContingencyElement.Contingency",
@@ -96,7 +96,6 @@ class CracBuilder:
             for contingency in self._crac.contingencies:
                 cnec_curative = cnec_preventive.model_copy(update={"contingencyId": contingency.id, "instant": "curative"})
                 self._crac.flowCnecs.append(cnec_curative)
-
 
     def process_remedial_actions(self):
 
