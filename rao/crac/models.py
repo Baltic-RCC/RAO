@@ -9,6 +9,10 @@ class Contingency(BaseModel):
     name: str
     networkElementsIds: List[str]
 
+    @field_serializer("networkElementsIds", when_used='unless-none')
+    def serialize_with_prefix(self, value: List[str]) -> List[str]:
+        return [f"_{val}" for val in value]
+
 
 class Threshold(BaseModel):
     unit: Literal['megawatt', 'ampere', 'percent_imax'] = 'ampere'  # Default unit is 'ampere', can be adjusted if needed
@@ -20,10 +24,11 @@ class Threshold(BaseModel):
 class Cnec(BaseModel):
     id: str
     name: str
+    description: str = Field(exclude=True)
     networkElementId: str
     operator: str
     thresholds: List[Threshold]
-    instant: Literal["preventive", "outage", "curative"]
+    instant: Literal["preventive", "outage", "curative"] = "preventive"
     optimized: bool = True
     monitored: bool = False
     nominalV: List[float] = [330.0]  # Default nominal voltage, can be adjusted if needed
@@ -86,6 +91,7 @@ class NetworkAction(BaseModel):
 class Crac(BaseModel):
 
     class Config:
+        # Serialize names with dashes if they have underscores
         alias_generator = lambda s: s.replace("_", "-")
         populate_by_name = True
 
@@ -104,6 +110,25 @@ class Crac(BaseModel):
     contingencies: List[Contingency] = Field(default_factory=list)
     flowCnecs: List[FlowCnec] = Field(default_factory=list)
     networkActions: List[NetworkAction] = Field(default_factory=list)
+
+    @field_serializer("flowCnecs", mode='plain')
+    def exclude_3w_transformer_from_flow_cnecs(self, values: List[FlowCnec]) -> List[FlowCnec]:
+        # TODO TEMPORARY FILTER - remove after September release
+        logger.warning(f"[TEMPORARY] Excluding 3W transformers from serialized CNECs for operator: ELERING")
+        logger.warning(f"[TEMPORARY] Excluding paired dangling lines from serialized CNECs")
+        result = []
+        for cnec in values:
+            if "AT" in cnec.name and "10X1001A1001A39W" in cnec.operator:
+                logger.warning(f"3W transformer CNEC excluded: {cnec.name}")
+                continue
+            # TODO remove after July release
+            elif "Tie-line" in cnec.description:
+                logger.warning(f"Dangling line CNEC excluded: {cnec.name}")
+                continue
+            else:
+                result.append(cnec)
+
+        return result
 
 
 if __name__ == "__main__":

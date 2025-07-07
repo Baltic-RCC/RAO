@@ -33,11 +33,12 @@ def get_limits(data):
 
     return limits
 
+
 def update_limits(models, crac_to_update):
 
     data = pandas.read_RDF(models)
 
-    limits = get_limits(data)
+    limits = get_limits(data=data)
 
     # Get voltages on terminals to convert A limits to MW
     limits = limits.merge(data.type_tableview("SvVoltage"), left_on="Terminal.TopologicalNode", right_on="SvVoltage.TopologicalNode", suffixes=("", "_SvVoltage"))
@@ -80,14 +81,18 @@ def update_limits(models, crac_to_update):
 
     for position, monitored_element in enumerate(crac['flowCnecs']):
 
+        # TODO figure out optimization that same CNEC on preventive and curative instance would be updated
+
         # Handle leading underscore in Crac file
         if monitored_element['networkElementId'].startswith("_"):
-            monitored_element['networkElementId'] = monitored_element['networkElementId'][1:]
+            _element_id = monitored_element['networkElementId'][1:]
+        else:
+            _element_id = monitored_element['networkElementId']
 
         # Set nominal voltage to operational voltages, taken from SV
-        if operational_voltage := voltages.get(monitored_element['networkElementId']):
+        if operational_voltage := voltages.get(_element_id):
             crac['flowCnecs'][position]['nominalV'] = [operational_voltage]
-            logger.debug(f"Flow CNEC {monitored_element['name']} nominal voltage updated: {operational_voltage}")
+            logger.debug(f"Flow CNEC {monitored_element['name']} [{monitored_element['instant']}] nominal voltage updated: {operational_voltage}")
 
         current_limits = patl_current_limits
         power_limits = patl_power_limits
@@ -97,17 +102,18 @@ def update_limits(models, crac_to_update):
             current_limits = tatl_current_limits
             power_limits = tatl_power_limits
 
-        if limit := power_limits.get(monitored_element['networkElementId']):
+        if limit := power_limits.get(_element_id):
             unit = "megawatt"
-        elif limit := current_limits.get(monitored_element['networkElementId']):
+        elif limit := current_limits.get(_element_id):
             unit = "ampere"
         else:
-            logger.warning(f"Limit not found for {monitored_element['networkElementId']}")
+            logger.warning(f"Limit not found for {monitored_element['name']} with element id: {_element_id}")
             continue
 
         crac['flowCnecs'][position]['thresholds'] = [{'max': limit, 'min': limit * -1, 'side': 1, 'unit': unit}]
 
     return crac
+
 
 if __name__ == "__main__":
 
