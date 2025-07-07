@@ -167,8 +167,8 @@ class HandlerVirtualOperator:
             if optimizer.results is None:
                 logger.warning("Optimizer has no results to be processed")
                 continue
-            cnec_data = optimizer.results.cnec_results
-            cost_data = optimizer.results.cost_results
+            cnec_data = optimizer.cnec_results
+            cost_data = optimizer.cost_results
             results = pd.concat([cnec_data, cost_data], ignore_index=True, sort=False)
             if results.empty:
                 logger.warning("Cost and CNEC results are empty")
