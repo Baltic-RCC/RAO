@@ -8,10 +8,9 @@ import pypowsybl
 import config
 from pathlib import Path
 from common.object_storage import ObjectStorage
-from integrations.elastic import Elastic
 from common.config_parser import parse_app_properties
 from common.decorators import performance_counter
-from rao.crac_builder import CracBuilder
+from rao.crac.builder import CracBuilder
 from rao.optimizer import Optimizer
 from rao.loadflow_tool_settings import CGMES_IMPORT_PARAMETERS
 from loguru import logger
@@ -55,36 +54,6 @@ class HandlerVirtualOperator:
         content = self.object_storage.get_content(metadata=self.network_model_meta, bucket_name=S3_BUCKET_IN_MODELS)
 
         return content
-
-    def send_results_to_elastic(self, index: str = ELASTIC_RESULTS_INDEX):
-        """
-        Method to send RAO in-memory results (cnec and cost) to Elastic platform
-        """
-        if self.results is None:
-            logger.info("RAO has no results to send to Elastic")
-            return
-
-        # Prepare structured results
-        try:
-            cnec_data = self.cnec_results
-            cost_data = self.cost_results
-
-            if cnec_data.empty and cost_data.empty:
-                logger.info("RAO result data is empty, nothing to send to Elastic")
-                return
-
-            # Combine both result sets
-            data_combined = pd.concat([ cnec_data, cost_data ], ignore_index=True, sort=False)
-            data_to_send = data_combined.fillna("").to_dict(orient="records")
-
-            logger.info(f"Sending RAO results to Elastic index: {index}")
-            elk_api.Elastic.send_to_elastic_bulk(
-                index=index,
-                json_message_list=data_to_send,
-                server=ELK_SERVER
-            )
-        except Exception as e:
-            logger.error(f"Failed to prepare RAO results for Elastic: {e}")
 
     @performance_counter(units='seconds')
     def handle(self, message: bytes, properties: dict, **kwargs):

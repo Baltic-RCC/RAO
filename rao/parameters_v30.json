@@ -15,7 +15,7 @@
     "absolute-minimum-impact-threshold" : 0.0
   },
   "not-optimized-cnecs" : {
-    "do-not-optimize-curative-cnecs-for-tsos-without-cras" : true
+    "do-not-optimize-curative-cnecs-for-tsos-without-cras" : false
   },
   "extensions" : {
     "open-rao-search-tree-parameters": {
@@ -40,7 +40,7 @@
         "max-curative-search-tree-depth" : 2,
         "predefined-combinations" : [],
         "skip-actions-far-from-most-limiting-element" : true,
-        "max-number-of-boundaries-for-skipping-actions" : 2
+        "max-number-of-boundaries-for-skipping-actions" : 1
       },
       "multi-threading" : {
         "available-cpus" : 4
@@ -64,10 +64,10 @@
             "twtSplitShuntAdmittance" : false,
             "shuntCompensatorVoltageControlOn" : false,
             "readSlackBus" : true,
-            "writeSlackBus" : false,
+            "writeSlackBus" : true,
             "dc" : false,
             "distributedSlack" : true,
-            "balanceType" : "PROPORTIONAL_TO_GENERATION_P_MAX",
+            "balanceType" : "PROPORTIONAL_TO_GENERATION_REMAINING_MARGIN",
             "dcUseTransformerRatio" : false,
             "countriesToBalance" : [],
             "connectedComponentMode" : "ALL",
@@ -76,18 +76,18 @@
             "extensions" : {
               "open-load-flow-parameters" : {
                 "plausibleActivePowerLimit" : 10000.0,
-                "minPlausibleTargetVoltage" : 0.5,
-                "maxPlausibleTargetVoltage" : 1.5,
-                "maxNewtonRaphsonIterations" : 100,
+                "minPlausibleTargetVoltage" : 0.8,
+                "maxPlausibleTargetVoltage" : 1.2,
+                "maxNewtonRaphsonIterations" : 15,
                 "newtonRaphsonConvEpsPerEq" : 1.0E-3,
                 "slackBusSelectionMode" : "MOST_MESHED",
                 "slackBusesIds" : [ ],
                 "lowImpedanceBranchMode" : "REPLACE_BY_ZERO_IMPEDANCE_LINE",
                 "loadPowerFactorConstant" : false,
-                "slackBusPMaxMismatch" : 1.0,
+                "slackBusPMaxMismatch" : 0.1,
                 "voltagePerReactivePowerControl" : false,
                 "voltageInitModeOverride" : "NONE",
-                "transformerVoltageControlMode" : "WITH_GENERATOR_VOLTAGE_CONTROL",
+                "transformerVoltageControlMode" : "AFTER_GENERATOR_VOLTAGE_CONTROL",
                 "minRealisticVoltage" : 0.5,
                 "maxRealisticVoltage" : 1.5,
                 "reactiveRangeCheckMode" : "MAX"

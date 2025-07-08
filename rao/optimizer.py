@@ -4,7 +4,7 @@ import pandas as pd
 import logging
 from common.decorators import performance_counter
 from rao.loadflow_tool_settings import LF_PARAMETERS, CGMES_IMPORT_PARAMETERS
-from rao.helper import repackage_model_zip
+from common.helper import repackage_model_zip
 from loguru import logger
 
 
