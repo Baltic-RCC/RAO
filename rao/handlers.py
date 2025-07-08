@@ -40,6 +40,7 @@ class HandlerVirtualOperator:
         # Metadata
         self.scenario_timestamp = None
         self.network_model_meta = None
+        self.crac = None
 
     def get_input_profiles(self):
         content = self.object_storage.get_latest_input_data(type_keyword=["CO", "AE", "RA"],
@@ -54,6 +55,58 @@ class HandlerVirtualOperator:
         content = self.object_storage.get_content(metadata=self.network_model_meta, bucket_name=S3_BUCKET_IN_MODELS)
 
         return content
+
+    @performance_counter(units='seconds')
+    def post_process_results(self, results: pd.DataFrame):
+
+        # Separate actions from CNEC results
+        _cols_to_pop = ["networkActionResults", "rangeActionResults"]
+        actions = results[_cols_to_pop]
+        results = results.drop(columns=_cols_to_pop)
+
+        # Transform dataframe from wide format to long by results type using melt
+        _cols_to_melt = ["flowCnecResults", "angleCnecResults", "voltageCnecResults"]
+        results = results.melt(id_vars=[col for col in results.columns if col not in _cols_to_melt],
+                               value_vars=_cols_to_melt,
+                               var_name='cnecResultsType',
+                               value_name='cnecResults')
+
+        # Drop CNEC result types where it is empty
+        results = results.explode(column=["cnecResults"]).dropna(subset=["cnecResults"])
+        results = pd.json_normalize(results.to_dict("records"))
+
+        # Map CNEC data
+        cnec_df = pd.DataFrame(self.crac['flowCnecs'])
+        cnec_df.columns = [f"cnec.{col}" for col in cnec_df.columns]
+        results = results.merge(cnec_df, how='left', left_on='cnecResults.flowCnecId', right_on='cnec.id').drop(columns='cnec.id')
+
+        # Map contingency data
+        contingency_df = pd.DataFrame(self.crac['contingencies'])
+        contingency_df.columns = [f"contingency.{col}" for col in contingency_df.columns]
+        results = results.merge(contingency_df, how='left', left_on='cnec.contingencyId', right_on='contingency.id').drop(columns='contingency.id')
+
+        # Normalize thresholds
+        results = pd.json_normalize(results.explode("cnec.thresholds").to_dict('records'))
+
+        # Explode and flatten network actions
+        actions = pd.json_normalize(actions['networkActionResults'].explode())
+        actions = pd.json_normalize(actions.explode("activatedStates").to_dict("records"))
+
+        # Combine dataframes
+        results = results.merge(actions,
+                                how='left',
+                                left_on=["cnec.instant", "cnec.contingencyId"],
+                                right_on=["activatedStates.instant", "activatedStates.contingency"])
+
+        # Map network action data
+        action_df = pd.DataFrame(self.crac['networkActions'])
+        action_df.columns = [f"action.{col}" for col in action_df.columns]
+        results = results.merge(action_df, how='left', left_on='networkActionId', right_on='action.id').drop(columns='action.id')
+
+        # TODO - explode by optimized network actions
+        # results = results.explode("action.terminalsConnectionActions")
+
+        return results
 
     @performance_counter(units='seconds')
     def handle(self, message: bytes, properties: dict, **kwargs):
@@ -118,37 +171,36 @@ class HandlerVirtualOperator:
             logger.info(f"Processing contingency: {mrid} with {len(data)} violations")
 
             # Build CRAC for each contingency
-            crac_file = crac_service.build_crac(contingency_ids=[mrid])
+            self.crac = crac_service.build_crac(contingency_ids=[mrid])
 
             # TODO for debugging - also we can store in minio
             with open("test_crac.json", "w") as f:
-                json.dump(crac_file, f, ensure_ascii=False, indent=4)
+                json.dump(self.crac, f, ensure_ascii=False, indent=4)
 
             # Start the optimization
-            crac_object = BytesIO(json.dumps(crac_file).encode('utf-8'))
+            crac_object = BytesIO(json.dumps(self.crac).encode('utf-8'))
             optimizer = Optimizer(network=self.network, crac=crac_object, debug=self.debug)
             optimizer.run()
 
             logger.info(f"Optimization finished for contingency: {mrid}")
 
-            # Aggregate results
+            # Post-process optimizer results
             logger.info(f"Post-processing results")
             if optimizer.results is None:
                 logger.warning("Optimizer has no results to be processed")
                 continue
-            cnec_data = optimizer.cnec_results
-            cost_data = optimizer.cost_results
-            results = pd.concat([cnec_data, cost_data], ignore_index=True, sort=False)
-            if results.empty:
-                logger.warning("Cost and CNEC results are empty")
-                continue
+            results = pd.json_normalize(optimizer.results.to_json())
+            results = self.post_process_results(results=results)
+
+            # Include message properties as meta
+            results['rmq'] = [properties.headers] * len(results)
 
             # Send results to Elastic
-            results = results.fillna("").to_dict(orient="records")
+            data_to_send = results.astype(object).where(pd.notna(results), None).to_dict("records")
             logger.info(f"Sending optimization results to Elastic index: {ELASTIC_RESULTS_INDEX}")
             self.object_storage.elastic_service.send_to_elastic_bulk(
                 index=ELASTIC_RESULTS_INDEX,
-                json_message_list=results,
+                json_message_list=data_to_send,
             )
 
         logger.info(f"Message handling completed successfully")

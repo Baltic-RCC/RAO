@@ -2,6 +2,19 @@ import io
 import uuid
 import logging
 from zipfile import ZipFile, ZIP_DEFLATED
+import pandas as pd
+from typing import List
+
+
+def dataframe_deep_explode(df: pd.DataFrame, column_chain: List[str]):
+    for col in column_chain:
+        df = df.explode(col).reset_index(drop=True)
+        normalized = pd.json_normalize(df[col])
+        prefix = f"{col}."
+        normalized.columns = [prefix + c for c in normalized.columns]
+        df = pd.concat([df.drop(columns=[col]), normalized], axis=1)
+    return df
+
 
 
 def package_for_pypowsybl(opdm_objects, return_zip: bool = False):

@@ -7,6 +7,7 @@ import datetime
 import traceback
 import time
 from elasticsearch import Elasticsearch
+import pypowsybl
 from common.config_parser import parse_app_properties
 
 
@@ -132,3 +133,8 @@ if ELASTIC_LOGS_HANDLER:
                enqueue=ENQUEUE,
                catch=CATCH,
                filter=std_log_filter)
+
+# Expose powsybl logs if defined by configuration
+if ENABLE_POWSYBL_LOGS:
+    logging.getLogger("powsybl").setLevel(LOG_LEVEL)
+    logger.info(f"Powsybl logs enabled with level: {LOG_LEVEL}")

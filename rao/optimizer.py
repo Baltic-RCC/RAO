@@ -21,12 +21,6 @@ class Optimizer:
         self.parameters = None
         self.results = None
 
-        if self.debug:
-            logger.info(f"Optimizer running in DEBUG mode")
-            logging.getLogger('powsybl').setLevel(logging.DEBUG)
-        else:
-            logging.getLogger('powsybl').setLevel(logging.INFO)
-
         self.runner = pypowsybl.rao.create_rao()
 
     @property
