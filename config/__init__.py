@@ -1,22 +1,21 @@
 from pathlib import Path
-import logging
+from loguru import logger
+from . import initialize_logging
 
 Path.read = Path.read_text
-
-logger = logging.getLogger(__name__)
 
 # Get the directory path of the configuration files
 config_directory = Path(__file__).resolve().parent
 
 
 # Create empty classes to store data
-class Paths():
+class Paths:
     pass
 
 
-class Attribute():
-
+class Attribute:
     pass
+
 
 # List to store all configuration file paths
 paths = Paths()
@@ -41,6 +40,3 @@ for path in dirs_to_check:
                 setattr(paths, child_path.parent.name, Attribute())
 
             setattr(getattr(paths, child_path.parent.name), child_path.stem, child_path.resolve())
-
-
-

@@ -36,7 +36,7 @@ class CracBuilder:
 
     def get_limits(self):
 
-        if not self.network:
+        if self.network is None:
             logger.error("Network model is not provided. Cannot retrieve limits.")
             return
 
