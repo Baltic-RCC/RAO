@@ -7,7 +7,8 @@ jobs:
   build-image:
     runs-on: ubuntu-latest
     env:
-      PROJECT_NAME: ${{ toLower(github.event.repository.name) }}-input-retriever
+      INPUT_RETRIEVER_PROJECT: ${{ toLower(github.event.repository.name) }}-input-retriever
+      RAO_PROJECT: ${{ toLower(github.event.repository.name) }}-rao
     steps:
       - uses: actions/checkout@v4
 
