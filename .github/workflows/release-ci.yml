@@ -29,8 +29,8 @@ jobs:
           file: input_retriever/Dockerfile
           push: true
           tags: |
-            ${{ vars.DOCKER_USERNAME }}/${{ env.PROJECT_NAME }}:${{ env.IMAGE_TAG }}
-            ${{ vars.DOCKER_USERNAME }}/${{ env.PROJECT_NAME }}:${{ env.LATEST_TAG }}
+            ${{ vars.DOCKER_USERNAME }}/${{ env.INPUT_RETRIEVER_PROJECT }}:${{ env.IMAGE_TAG }}
+            ${{ vars.DOCKER_USERNAME }}/${{ env.INPUT_RETRIEVER_PROJECT }}:${{ env.LATEST_TAG }}
             
       - uses: docker/build-push-action@v5
         with:
@@ -38,5 +38,5 @@ jobs:
           file: rao/Dockerfile
           push: true
           tags: |
-            ${{ vars.DOCKER_USERNAME }}/${{ env.PROJECT_NAME }}:${{ env.IMAGE_TAG }}
-            ${{ vars.DOCKER_USERNAME }}/${{ env.PROJECT_NAME }}:${{ env.LATEST_TAG }}
+            ${{ vars.DOCKER_USERNAME }}/${{ env.RAO_PROJECT }}:${{ env.IMAGE_TAG }}
+            ${{ vars.DOCKER_USERNAME }}/${{ env.RAO_PROJECT }}:${{ env.LATEST_TAG }}
