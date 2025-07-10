@@ -36,7 +36,7 @@ class S3Minio:
         self.server = server
         self.username = username
         self.password = password
-        self.token_expiration = datetime.utcnow()
+        self.token_expiration = datetime.now(timezone.utc)
         self.http_client = urllib3.PoolManager(
                 maxsize=int(MAXSIZE),
                 cert_reqs='CERT_NONE',
@@ -48,7 +48,7 @@ class S3Minio:
     def _create_client(self):
         """Connect to Minio"""
         credentials = self._get_credentials()
-        self.token_expiration = parse_datetime(credentials['Expiration']).replace(tzinfo=None)
+        self.token_expiration = parse_datetime(credentials['Expiration']).astimezone(timezone.utc)
         self.client = minio.Minio(endpoint=self.server,
                                   access_key=credentials['AccessKeyId'],
                                   secret_key=credentials['SecretAccessKey'],
