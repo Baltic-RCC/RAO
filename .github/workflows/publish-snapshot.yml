@@ -7,9 +7,6 @@ on:
 jobs:
   build-image:
     runs-on: ubuntu-latest
-    env:
-      INPUT_RETRIEVER_PROJECT: ${{ toLower(github.event.repository.name) }}-input-retriever
-      RAO_PROJECT: ${{ toLower(github.event.repository.name) }}-optimizer
     steps:
       - uses: actions/checkout@v4
 
