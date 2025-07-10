@@ -7,14 +7,15 @@ jobs:
   build-image:
     runs-on: ubuntu-latest
     env:
-      PROJECT_NAME: ${{ toLower(github.event.repository.name) }}-input-retriever
+      INPUT_RETRIEVER_PROJECT: ${{ toLower(github.event.repository.name) }}-input-retriever
+      RAO_PROJECT: ${{ toLower(github.event.repository.name) }}-optimizer
     steps:
       - uses: actions/checkout@v4
 
       - name: Set Variables
         run: |
           echo "INPUT_RETRIEVER_PROJECT=$(basename "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')-input-retriever" >> $GITHUB_ENV
-          echo "RAO_PROJECT=$(basename "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')-rao" >> $GITHUB_ENV
+          echo "RAO_PROJECT=$(basename "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')-optimizer" >> $GITHUB_ENV
           echo "IMAGE_TAG=$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
           echo "LATEST_TAG=latest" >> $GITHUB_ENV
 
