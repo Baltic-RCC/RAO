@@ -1,21 +1,20 @@
 import requests
 from lxml import etree
 import minio
+from minio.commonconfig import Tags
 import urllib3
 import sys
 import mimetypes
 import re
-import logging
 import config
 import functools
 from io import BytesIO
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from aniso8601 import parse_datetime
 from common.config_parser import parse_app_properties
+from loguru import logger
 
 urllib3.disable_warnings()
-
-logger = logging.getLogger(__name__)
 
 parse_app_properties(globals(), config.paths.integrations.minio)
 
@@ -23,7 +22,7 @@ parse_app_properties(globals(), config.paths.integrations.minio)
 def renew_authentication_token(func):
     @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
-        if datetime.utcnow() >= self.token_expiration - timedelta(seconds=int(TOKEN_RENEW_MARGIN)):  # 120s margin before token expiration
+        if datetime.now(timezone.utc) >= self.token_expiration - timedelta(seconds=int(TOKEN_RENEW_MARGIN)):  # 120s margin before token expiration
             logger.warning("Authentication token going to expire soon, renewing token")
             self._create_client()
         return func(self, *args, **kwargs)
@@ -85,13 +84,27 @@ class S3Minio:
 
         return credentials
 
+    @staticmethod
+    def dict_to_tags(tags: dict):
+        converted = Tags.new_object_tags()
+        for k, v in tags.items():
+            converted[k] = v
+
+        return converted
+
     @renew_authentication_token
-    def upload_object(self, file_path_or_file_object: str | BytesIO, bucket_name: str, metadata: dict | None = None):
+    def upload_object(self,
+                      file_path_or_file_object: str | BytesIO,
+                      bucket_name: str,
+                      metadata: dict | None = None,
+                      tags: dict | None = None,
+                      ):
         """
         Method to upload file to Minio storage
         :param file_path_or_file_object: file path or BytesIO object
         :param bucket_name: bucket name
         :param metadata: object metadata
+        :param tags: object tags
         :return: response from Minio
         """
         file_object = file_path_or_file_object
@@ -102,31 +115,38 @@ class S3Minio:
         else:
             length = file_object.getbuffer().nbytes
 
+        # Handle tags if provided
+        if tags:
+            tags = self.dict_to_tags(tags)
+
         # Just to be sure that pointer is at the beginning of the content
         file_object.seek(0)
 
         # TODO - check that bucket exists and it has access to it, maybe also try to create one
-
+        logger.info(f"Uploading object to bucket {bucket_name}: {file_object.name}")
         response = self.client.put_object(
             bucket_name=bucket_name,
             object_name=file_object.name,
             data=file_object,
             length=length,
             content_type=mimetypes.guess_type(file_object.name)[0],
-            metadata=metadata
+            metadata=metadata,
+            tags=tags,
         )
 
         return response
 
     @renew_authentication_token
     def download_object(self, bucket_name: str, object_name: str):
+        response = None
         try:
             object_name = object_name.replace("//", "/")
             file_data = self.client.get_object(bucket_name, object_name)
-            return file_data.read()
-
+            response = file_data.read()
         except minio.error.S3Error as err:
-            logger.error(err)
+            logger.error(f"Error downloading object {object_name} from bucket {bucket_name}: {err}", exc_info=True)
+
+        return response
 
     @renew_authentication_token
     def object_exists(self, object_name: str, bucket_name: str) -> bool:
@@ -149,11 +169,14 @@ class S3Minio:
                      include_user_meta: bool = True,
                      include_version:  bool = False):
         """Return all object of specified bucket"""
+        objects = []
         try:
-            objects = self.client.list_objects(bucket_name, prefix, recursive, start_after, include_user_meta, include_version)
-            return objects
+            response = self.client.list_objects(bucket_name, prefix, recursive, start_after, include_user_meta, include_version)
+            objects.extend(response)
         except minio.error.S3Error as err:
-            logger.error(err, exc_info=True)
+            logger.error(f"Error listing objects in bucket {bucket_name} with prefix {prefix}: {err}", exc_info=True)
+
+        return objects
 
     @renew_authentication_token
     def query_objects(self, bucket_name: str, metadata: dict = None, prefix: str = None, use_regex: bool = False):
@@ -197,16 +220,7 @@ class S3Minio:
 
 if __name__ == '__main__':
     # Test Minio API
-    ## Define logging
-    logging.basicConfig(
-        format='%(levelname) -10s %(asctime) -20s %(name) -35s %(funcName) -35s %(lineno) -5d: %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        level=logging.INFO,
-        handlers=[logging.StreamHandler(sys.stdout)]
-    )
-
-    ## Start service
-    service = ObjectStorage()
+    service = S3Minio()
     buckets = service.client.list_buckets()
     objects = service.list_objects(bucket_name='iop')
     print(buckets)

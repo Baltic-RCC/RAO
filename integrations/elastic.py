@@ -1,7 +1,6 @@
 import datetime
 import requests
 import ndjson
-import logging
 import pandas as pd
 import json
 import uuid
@@ -9,12 +8,11 @@ from typing import List, Dict
 from elasticsearch import Elasticsearch
 import config
 from common.config_parser import parse_app_properties
+from loguru import logger
 
 import warnings
 from elasticsearch.exceptions import ElasticsearchWarning
 warnings.simplefilter('ignore', ElasticsearchWarning)
-
-logger = logging.getLogger(__name__)
 
 parse_app_properties(caller_globals=globals(), path=config.paths.integrations.elastic)
 

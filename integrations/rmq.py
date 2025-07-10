@@ -415,7 +415,7 @@ class RMQConsumer:
         :param bytes body: The message body
         """
         logger.info(
-            f"Received message # {basic_deliver.delivery_tag} from {properties.app_id} meta: {properties.headers}")
+            f"Received message #{basic_deliver.delivery_tag} from {properties.app_id} meta: {properties.headers}")
         logger.debug(f"Message body: {body}")
         self._executor.submit(self._process_messages, basic_deliver, properties, body)
 

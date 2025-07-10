@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pika import BasicProperties
 from io import BytesIO
 import pandas as pd
@@ -82,26 +82,37 @@ class HandlerVirtualOperator:
 
         # Map contingency data
         contingency_df = pd.DataFrame(self.crac['contingencies'])
-        contingency_df.columns = [f"contingency.{col}" for col in contingency_df.columns]
-        results = results.merge(contingency_df, how='left', left_on='cnec.contingencyId', right_on='contingency.id').drop(columns='contingency.id')
+        if not contingency_df.empty:
+            contingency_df.columns = [f"contingency.{col}" for col in contingency_df.columns]
+            results = results.merge(contingency_df,
+                                    how='left',
+                                    left_on='cnec.contingencyId',
+                                    right_on='contingency.id').drop(columns='contingency.id')
 
         # Normalize thresholds
         results = pd.json_normalize(results.explode("cnec.thresholds").to_dict('records'))
 
         # Explode and flatten network actions
-        actions = pd.json_normalize(actions['networkActionResults'].explode())
-        actions = pd.json_normalize(actions.explode("activatedStates").to_dict("records"))
+        ## Check if there are any actions received from optimizer
+        _optimized_actions_flag = bool(actions.apply(lambda col: col.map(lambda x: x != [])).values.any())
+        if _optimized_actions_flag:
+            actions = pd.json_normalize(actions['networkActionResults'].explode())
+            actions = pd.json_normalize(actions.explode("activatedStates").to_dict("records"))
 
-        # Combine dataframes
-        results = results.merge(actions,
-                                how='left',
-                                left_on=["cnec.instant", "cnec.contingencyId"],
-                                right_on=["activatedStates.instant", "activatedStates.contingency"])
+            # Combine dataframes
+            results = results.merge(actions,
+                                    how='left',
+                                    left_on=["cnec.instant", "cnec.contingencyId"],
+                                    right_on=["activatedStates.instant", "activatedStates.contingency"])
 
-        # Map network action data
-        action_df = pd.DataFrame(self.crac['networkActions'])
-        action_df.columns = [f"action.{col}" for col in action_df.columns]
-        results = results.merge(action_df, how='left', left_on='networkActionId', right_on='action.id').drop(columns='action.id')
+            # Map network action data
+            action_df = pd.DataFrame(self.crac['networkActions'])
+            if not action_df.empty:
+                action_df.columns = [f"action.{col}" for col in action_df.columns]
+                results = results.merge(action_df,
+                                        how='left',
+                                        left_on='networkActionId',
+                                        right_on='action.id').drop(columns='action.id')
 
         # TODO - explode by optimized network actions
         # results = results.explode("action.terminalsConnectionActions")
@@ -109,13 +120,21 @@ class HandlerVirtualOperator:
         return results
 
     @performance_counter(units='seconds')
-    def handle(self, message: bytes, properties: dict, **kwargs):
+    def handle(self, message: bytes, properties: object, **kwargs):
         """
         Process received SAR profile
         """
+        # Get unique x-message-id from headers, if not there - create
+        message_id = properties.headers.get('x-message-id', str(uuid.uuid4()))
+        if getattr(config.initialize_logging, 'elastic_handler', None):
+            config.initialize_logging.elastic_handler.extra.update({
+                'x-message-id': message_id,
+                'x-source-module': properties.headers.get('x-source-module', 'unknown')
+            })
+        logger.info(f"Handling message with id: {message_id}")
 
         # Get metadata from properties
-        self.scenario_timestamp = getattr(properties, 'headers').get('scenario_time', None)
+        self.scenario_timestamp = getattr(properties, 'headers').get('scenario_time', datetime.now(timezone.utc))
 
         # Store SAR to BytesIO object and load to triplets to scan violations
         sar = BytesIO(message)
@@ -173,24 +192,36 @@ class HandlerVirtualOperator:
             # Build CRAC for each contingency
             self.crac = crac_service.build_crac(contingency_ids=[mrid])
 
-            # TODO for debugging - also we can store in minio
-            with open("test_crac.json", "w") as f:
-                json.dump(self.crac, f, ensure_ascii=False, indent=4)
+            # For debugging
+            # with open("test-crac.json", "w") as f:
+            #     json.dump(self.crac, f, ensure_ascii=False, indent=4)
+
+            # Store built CRAC files in S3 storage
+            crac_object = BytesIO(json.dumps(self.crac).encode('utf-8'))
+            crac_object.name = f"RAO/CRAC_{properties.headers['time_horizon']}_{self.scenario_timestamp:%Y%m%dT%H%M}_CO_{mrid}.json"
+            self.object_storage.s3_service.upload_object(file_path_or_file_object=crac_object,
+                                                         bucket_name=S3_BUCKET_RESULTS,
+                                                         metadata=properties.headers)
 
             # Start the optimization
-            crac_object = BytesIO(json.dumps(self.crac).encode('utf-8'))
             optimizer = Optimizer(network=self.network, crac=crac_object, debug=self.debug)
             optimizer.run()
 
             logger.info(f"Optimization finished for contingency: {mrid}")
 
-            # Post-process optimizer results
-            logger.info(f"Post-processing results")
+            # Check optimizer results
             if optimizer.results is None:
                 logger.warning("Optimizer has no results to be processed")
                 continue
-            results = pd.json_normalize(optimizer.results.to_json())
-            results = self.post_process_results(results=results)
+
+            # Serialize results to json
+            results = optimizer.results.to_json()
+            if not results['networkActionResults'] and not results['rangeActionResults']:
+                logger.warning(f"No possible actions proposed by optimizer")
+
+            # Post-process optimizer results
+            logger.info(f"Post-processing results")
+            results = self.post_process_results(results=pd.json_normalize(results))
 
             # Include message properties as meta
             results['rmq'] = [properties.headers] * len(results)
@@ -219,7 +250,9 @@ if __name__ == '__main__':
         "sender": "TSOX",
         "senderApplication": "APPX",
         "service": "INPUT-DATA",
-        "@scenario_timestamp": datetime(2025, 6, 2, 10, 30)
+        "scenario_time": datetime(2025, 7, 10, 10, 30),
+        "time_horizon": "1D",
+        "content_reference": "EMFOS/RMM/RMM_1D_001_20250709T1930Z_BA_202dfb11-aa28-4898-aaa6-0535e3f79cb1.zip",
     }
     properties = BasicProperties(
         content_type='application/octet-stream',

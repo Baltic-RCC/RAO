@@ -1,7 +1,7 @@
 from loguru import logger
 import pandas as pd
 import triplets
-from crac import models
+from rao.crac import models
 import json
 from common.decorators import performance_counter
 

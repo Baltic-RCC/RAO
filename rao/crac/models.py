@@ -119,11 +119,11 @@ class Crac(BaseModel):
         result = []
         for cnec in values:
             if "AT" in cnec.name and "10X1001A1001A39W" in cnec.operator:
-                logger.warning(f"3W transformer CNEC excluded: {cnec.name}")
+                logger.warning(f"3W transformer CNEC excluded: {cnec.name} [{cnec.instant}]")
                 continue
             # TODO remove after July release
             elif "Tie-line" in cnec.description:
-                logger.warning(f"Dangling line CNEC excluded: {cnec.name}")
+                logger.warning(f"Dangling line CNEC excluded: {cnec.name} [{cnec.instant}]")
                 continue
             else:
                 result.append(cnec)
