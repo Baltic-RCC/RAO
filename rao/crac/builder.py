@@ -85,7 +85,7 @@ class CracBuilder:
             condition = limits["ActivePowerLimit.value"].isna() & limits["CurrentLimit.value"].notna() & limits["SvVoltage.v"].notna()
             # Calculate MW and assign
             limits.loc[condition, "ActivePowerLimit.value"] = round(
-                3 ** 0.5 * limits.loc[condition, "CurrentLimit.value"] * limits.loc[condition, "SvVoltage.v"] / 1000, 1)
+                ((3 ** 0.5) * limits.loc[condition, "CurrentLimit.value"] * limits.loc[condition, "SvVoltage.v"]) / 1000, 1)
 
         self.limits = limits
 
@@ -99,8 +99,9 @@ class CracBuilder:
         patl_limits = self.limits[self.limits["OperationalLimitType.limitType"].str.endswith(".patl")].groupby("ID_Equipment")
         tatl_limits = self.limits[self.limits["OperationalLimitType.limitType"].str.endswith(".tatl")].groupby("ID_Equipment")
 
-        # Generate mean voltages for equipment
+        # Generate mean and max voltages for equipment
         voltages = patl_limits["SvVoltage.v"].mean().round(1).to_dict()
+        max_voltage = patl_limits["SvVoltage.v"].max().round(1).to_dict()
 
         patl_current_limits = {}
         tatl_current_limits = {}
@@ -120,15 +121,36 @@ class CracBuilder:
 
             # Set nominal voltage to operational voltages, taken from SV
             if operational_voltage := voltages.get(monitored_element.networkElementId):
-                monitored_element.nominalV = [operational_voltage]
-                logger.debug(f"Flow CNEC {monitored_element.name} [{monitored_element.instant}] nominal voltage updated: {operational_voltage}")
-
+                # TODO add both sides of the equipment when building CRAC nominal voltages
+                if "_AT" in monitored_element.name:
+                    max_op_voltage = max_voltage.get(monitored_element.networkElementId)
+                    monitored_element.nominalV = [max_op_voltage]
+                    logger.debug(f"Flow CNEC {monitored_element.name} [{monitored_element.instant}] max operational voltage selected: {max_voltage}")
+                else:
+                    monitored_element.nominalV = [operational_voltage]
+                    logger.debug(f"Flow CNEC {monitored_element.name} [{monitored_element.instant}] nominal voltage updated: {operational_voltage}")
+            # Set limits for preventative state
             current_limits = patl_current_limits
             power_limits = patl_power_limits
 
+            # Set limits for curative state
             if monitored_element.instant == "curative":
-                current_limits = tatl_current_limits
-                power_limits = tatl_power_limits
+                current_limits = tatl_current_limits.copy()
+                power_limits = tatl_power_limits.copy()
+
+            # Fallback logic for missing curative state TATL limits
+            #TODO temporary fix, TATL must be accurately represented in the models
+            if power_limits.get(monitored_element.networkElementId) is None:
+                fallback_limit = patl_power_limits.get(monitored_element.networkElementId)
+                if fallback_limit is not None:
+                    power_limits[monitored_element.networkElementId] = fallback_limit
+                    logger.warning(f"TATL power limit is missing for {monitored_element.name}, using PATL value instead")
+
+            if current_limits.get(monitored_element.networkElementId) is None:
+                fallback_limit = patl_current_limits.get(monitored_element.networkElementId)
+                if fallback_limit is not None:
+                    current_limits[ monitored_element.networkElementId ] = fallback_limit
+                    logger.warning(f"TATL current limit is missing for {monitored_element.name}, using PATL value instead")
 
             if limit := power_limits.get(monitored_element.networkElementId):
                 unit = "megawatt"
