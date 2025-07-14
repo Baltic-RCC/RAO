@@ -135,6 +135,8 @@ class HandlerVirtualOperator:
 
         # Get metadata from properties
         self.scenario_timestamp = getattr(properties, 'headers').get('scenario_time', datetime.now(timezone.utc))
+        if isinstance(self.scenario_timestamp, str):
+            self.scenario_timestamp = datetime.fromisoformat(self.scenario_timestamp)
 
         # Store SAR to BytesIO object and load to triplets to scan violations
         sar = BytesIO(message)
