@@ -33,6 +33,7 @@ class Optimizer:
 
     def load_parameters(self, path: str = r"parameters_v30.json"):
         self.parameters = pypowsybl.rao.Parameters()
+        logger.debug(f"Initalising with parameters: {path}")
         self.parameters.load_from_file_source(parameters_file=path)
         logger.debug(f"Parameters loaded from: {path}")
 
@@ -58,6 +59,7 @@ class Optimizer:
 
     @performance_counter(units='seconds')
     def run(self):
+        logger.debug(f"Starting the RAO, loading the parameters")
         self.load_parameters()
         self.load_crac()
         logger.info(f"Starting optimization")
