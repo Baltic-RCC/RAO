@@ -1,4 +1,5 @@
 import io
+import os
 import pypowsybl
 import pandas as pd
 import logging
@@ -31,10 +32,13 @@ class Optimizer:
     def cost_results(self):
         return pd.json_normalize(self.results.to_json()['costResults'])
 
-    def load_parameters(self, path: str = r"parameters_v30.json"):
+    def load_parameters(self, path: str = None):
+        if path is None:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            path = os.path.join(base_dir, "parameters_v30.json")
         self.parameters = pypowsybl.rao.Parameters()
         self.parameters.load_from_file_source(parameters_file=path)
-        logger.debug(f"Parameters loaded from: {path}")
+        logger.info(f"Parameters loaded from: {path}")
 
     def load_crac(self):
         if isinstance(self.crac, str):
