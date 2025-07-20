@@ -1,11 +1,16 @@
 import uuid
 from datetime import datetime, timezone
+from textwrap import indent
+
 from pika import BasicProperties
 from io import BytesIO
 import pandas as pd
 import json
 import pypowsybl
+from typing_extensions import override
+
 import config
+import re
 from pathlib import Path
 from common.object_storage import ObjectStorage
 from common.config_parser import parse_app_properties
@@ -14,6 +19,9 @@ from rao.crac.builder import CracBuilder
 from rao.optimizer import Optimizer
 from rao.loadflow_tool_settings import CGMES_IMPORT_PARAMETERS
 from loguru import logger
+from rao.params_utils import ParameterOverride
+from copy import deepcopy
+from typing import Dict
 
 
 parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
@@ -181,6 +189,23 @@ class HandlerVirtualOperator:
         self.network = pypowsybl.network.load_from_binary_buffer(buffer=network_object,
                                                                  parameters=CGMES_IMPORT_PARAMETERS)
 
+        # Get original parameter file path
+        parameters_path = Path(__file__).parent / "parameters_v30.json"
+        override_path = None
+
+        # If time horizon is ID, create modified temporary parameter file
+        time_horizon = self.network_model_meta.get("@time_horizon")
+
+        if time_horizon == "ID":
+            keys_path = [
+                "extensions",
+                "open-rao-search-tree-parameters",
+                "topological-actions-optimization",
+                "max-curative-search-tree-depth"
+            ]
+            override_context = ParameterOverride(parameters_path, keys_path, new_value=1)
+            override_path = override_context.__enter__()
+
         # Create CRAC service
         crac_service = CracBuilder(data=input_files_data, network=pd.read_RDF(network_object))
         crac_service.get_limits()  # get limits from model and store in CRAC service object
@@ -195,8 +220,8 @@ class HandlerVirtualOperator:
             self.crac = crac_service.build_crac(contingency_ids=[mrid])
 
             # For debugging
-            # with open("test-crac.json", "w") as f:
-            #     json.dump(self.crac, f, ensure_ascii=False, indent=4)
+            with open("test-crac.json", "w") as f:
+                json.dump(self.crac, f, ensure_ascii=False, indent=4)
 
             # Store built CRAC files in S3 storage
             crac_object = BytesIO(json.dumps(self.crac).encode('utf-8'))
@@ -206,7 +231,8 @@ class HandlerVirtualOperator:
                                                          metadata=properties.headers)
 
             # Start the optimization
-            optimizer = Optimizer(network=self.network, crac=crac_object, debug=self.debug)
+            print(f"Using param path: {override_path or parameters_path}")
+            optimizer = Optimizer(network=self.network, crac=crac_object, debug=self.debug, parameters_path=str(override_path or parameters_path))
             optimizer.run()
 
             logger.info(f"Optimization finished for contingency: {mrid}")
@@ -225,8 +251,15 @@ class HandlerVirtualOperator:
             logger.info(f"Post-processing results")
             results = self.post_process_results(results=pd.json_normalize(results))
 
+            # Logging status of successful optimization process for contingency
+            logger.success(f"Optimization successful for contingency {mrid}")
+
             # Include message properties as meta
             results['rmq'] = [properties.headers] * len(results)
+
+            # Delete the temporary parameters file if one was created
+            if override_context:
+                override_context.__exit__(None, None, None)
 
             # Send results to Elastic
             data_to_send = results.astype(object).where(pd.notna(results), None).to_dict("records")
@@ -253,8 +286,8 @@ if __name__ == '__main__':
         "senderApplication": "APPX",
         "service": "INPUT-DATA",
         "scenario_time": datetime(2025, 7, 10, 10, 30),
-        "time_horizon": "1D",
-        "content_reference": "EMFOS/RMM/RMM_1D_001_20250709T1930Z_BA_202dfb11-aa28-4898-aaa6-0535e3f79cb1.zip",
+        "time_horizon": "ID",
+        "content_reference": "EMFOS/RMM/RMM_20_001_20250709T1730Z_BA_9ac94769-6d91-4eee-9e87-9ba4144e657c.zip",
     }
     properties = BasicProperties(
         content_type='application/octet-stream',
@@ -264,7 +297,7 @@ if __name__ == '__main__':
         timestamp=1747208205,
         headers=headers,
     )
-    with open(r"../test-data/SAR_20250609T1230_1D_1.xml", "rb") as file:
+    with open(r"C:\Users\lukas.navickas\Documents\test_data_rao\SAR_20250709T1830_ID_1.xml", "rb") as file:
         file_bytes = file.read()
 
     # Create instance

@@ -14,13 +14,15 @@ class Optimizer:
     def __init__(self,
                  network: pypowsybl.network.Network,
                  crac: str | io.BytesIO,
-                 debug: bool = False):
+                 debug: bool = False,
+                 parameters_path = None):
 
         self.network = network
         self.crac = crac
         self.debug = debug
         self.parameters = None
         self.results = None
+        self.parameters_path = parameters_path
 
         self.runner = pypowsybl.rao.create_rao()
 
@@ -34,8 +36,11 @@ class Optimizer:
 
     def load_parameters(self, path: str = None):
         if path is None:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            path = os.path.join(base_dir, "parameters_v30.json")
+            if hasattr(self, "parameters_path") and self.parameters_path:
+                path = self.parameters_path
+            else:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                path = os.path.join(base_dir, "parameters_v30.json")
         self.parameters = pypowsybl.rao.Parameters()
         self.parameters.load_from_file_source(parameters_file=path)
         logger.info(f"Parameters loaded from: {path}")
