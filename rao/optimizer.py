@@ -37,6 +37,7 @@ class Optimizer:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             path = os.path.join(base_dir, "parameters_v30.json")
         self.parameters = pypowsybl.rao.Parameters()
+        logger.debug(f"Initalising with parameters: {path}")
         self.parameters.load_from_file_source(parameters_file=path)
         logger.info(f"Parameters loaded from: {path}")
 
@@ -62,6 +63,7 @@ class Optimizer:
 
     @performance_counter(units='seconds')
     def run(self):
+        logger.debug(f"Starting the RAO, loading the parameters")
         self.load_parameters()
         self.load_crac()
         logger.info(f"Starting optimization")
