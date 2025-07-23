@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import pypowsybl
 import pandas as pd
@@ -7,6 +8,7 @@ from common.decorators import performance_counter
 from rao.loadflow_tool_settings import LF_PARAMETERS, CGMES_IMPORT_PARAMETERS
 from common.helper import repackage_model_zip
 from loguru import logger
+from io import BytesIO
 
 
 class Optimizer:
@@ -35,15 +37,37 @@ class Optimizer:
         return pd.json_normalize(self.results.to_json()['costResults'])
 
     def load_parameters(self, path: str = None):
+        """
+        Loads optimization parameters from:
+            - BytesIO buffer via load_from_buffer_source() (default for ID)
+            - File path via load_from_file_source() (default for 1D)
+        """
+
         if path is None:
-            if hasattr(self, "parameters_path") and self.parameters_path:
-                path = self.parameters_path
-            else:
+            path = getattr(self, "parameters_path", None)
+            if not path:
                 base_dir = os.path.dirname(os.path.abspath(__file__))
                 path = os.path.join(base_dir, "parameters_v30.json")
-        self.parameters = pypowsybl.rao.Parameters()
-        self.parameters.load_from_file_source(parameters_file=path)
-        logger.info(f"Parameters loaded from: {path}")
+
+        if isinstance(path, BytesIO):
+            path.seek(0)
+            logger.info("Loading parameters from in-memory BytesIO buffer")
+            self.parameters = pypowsybl.rao.Parameters()
+            self.parameters.load_from_buffer_source(path)
+
+
+        elif isinstance(path, str) or isinstance(path, os.PathLike):
+            logger.info(f"Loading parameters from file: {path}")
+            self.parameters = pypowsybl.rao.Parameters()
+            self.parameters.load_from_file_source(parameters_file=str(path))
+
+        else:
+            raise TypeError("Unsupported path type for load_parameters(): expected str or BytesIO")
+
+        if isinstance(path, BytesIO):
+            logger.info("Parameters loaded successfully from in-memory BytesIO stream")
+        else:
+            logger.info(f"Parameters loaded successfully from: {path}")
 
     def load_crac(self):
         if isinstance(self.crac, str):
@@ -95,7 +119,7 @@ if __name__ == '__main__':
     lf_results = rao.solve_loadflow()
     rao.run()
     print(rao.results)
-    # rao.results.serialize(r"test_output.json")
+    rao.results.serialize(r"test_output.json")
 
     # Clean network variants
     # rao.clean_network_variants()
