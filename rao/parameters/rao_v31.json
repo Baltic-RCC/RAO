@@ -1,0 +1,120 @@
+{
+  "version" : "3.1",
+  "objective-function" : {
+    "type" : "MAX_MIN_MARGIN",
+    "unit" : "MW",
+    "enforce-curative-security" : true
+  },
+  "range-actions-optimization" : {
+    "pst-ra-min-impact-threshold" : 0.01,
+    "hvdc-ra-min-impact-threshold" : 0.001,
+    "injection-ra-min-impact-threshold" : 0.001
+  },
+  "topological-actions-optimization" : {
+    "relative-minimum-impact-threshold" : 0.0,
+    "absolute-minimum-impact-threshold" : 1.0
+  },
+  "not-optimized-cnecs" : {
+    "do-not-optimize-curative-cnecs-for-tsos-without-cras" : false
+  },
+  "extensions" : {
+    "open-rao-search-tree-parameters": {
+      "objective-function" : {
+        "curative-min-obj-improvement" : 0.0
+      },
+      "range-actions-optimization" : {
+        "max-mip-iterations" : 5,
+        "pst-sensitivity-threshold" : 0.0,
+        "pst-model" : "APPROXIMATED_INTEGERS",
+        "hvdc-sensitivity-threshold" : 0.0,
+        "injection-ra-sensitivity-threshold" : 0.0,
+        "linear-optimization-solver" : {
+          "solver" : "CBC",
+          "relative-mip-gap" : 0.001,
+          "solver-specific-parameters" : "THREADS 10 MAXTIME 3000"
+        }
+      },
+      "topological-actions-optimization" : {
+        "max-preventive-search-tree-depth" : 2,
+        "max-curative-search-tree-depth" : 2,
+        "predefined-combinations" : [],
+        "skip-actions-far-from-most-limiting-element" : true,
+        "max-number-of-boundaries-for-skipping-actions" : 1
+      },
+      "multi-threading" : {
+        "available-cpus" : 4
+      },
+      "second-preventive-rao" : {
+        "execution-condition" : "DISABLED",
+        "re-optimize-curative-range-actions" : false,
+        "hint-from-first-preventive-rao" : false
+      },
+      "load-flow-and-sensitivity-computation" : {
+        "load-flow-provider" : "OpenLoadFlow",
+        "sensitivity-provider" : "OpenLoadFlow",
+        "sensitivity-failure-over-cost" : 0.0,
+        "sensitivity-parameters" : {
+          "version" : "1.0",
+          "load-flow-parameters" : {
+            "version" : "1.9",
+            "voltageInitMode" : "UNIFORM_VALUES",
+            "transformerVoltageControlOn" : false,
+            "phaseShifterRegulationOn" : false,
+            "noGeneratorReactiveLimits" : false,
+            "twtSplitShuntAdmittance" : false,
+            "shuntCompensatorVoltageControlOn" : false,
+            "readSlackBus" : true,
+            "writeSlackBus" : true,
+            "dc" : false,
+            "distributedSlack" : true,
+            "balanceType" : "PROPORTIONAL_TO_GENERATION_P_MAX",
+            "dcUseTransformerRatio" : false,
+            "countriesToBalance" : [],
+            "connectedComponentMode" : "ALL",
+            "hvdcAcEmulation" : false,
+            "dcPowerFactor" : 1.0,
+            "extensions" : {
+              "open-load-flow-parameters" : {
+                "plausibleActivePowerLimit" : 10000.0,
+                "minPlausibleTargetVoltage" : 0.8,
+                "maxPlausibleTargetVoltage" : 1.2,
+                "maxNewtonRaphsonIterations" : 30,
+                "newtonRaphsonConvEpsPerEq" : 1.0E-3,
+                "slackBusSelectionMode" : "MOST_MESHED",
+                "slackBusesIds" : [ ],
+                "throwsExceptionInCaseOfSlackDistributionFailure" : false,
+                "lowImpedanceBranchMode" : "REPLACE_BY_ZERO_IMPEDANCE_LINE",
+                "loadPowerFactorConstant" : false,
+                "addRatioToLinesWithDifferentNominalVoltageAtBothEnds" : true,
+                "slackBusPMaxMismatch" : 0.1,
+                "voltagePerReactivePowerControl" : false,
+                "voltageInitModeOverride" : "NONE",
+                "transformerVoltageControlMode" : "AFTER_GENERATOR_VOLTAGE_CONTROL",
+                "minRealisticVoltage" : 0.5,
+                "maxRealisticVoltage" : 1.5,
+                "reactiveRangeCheckMode" : "MAX"
+              }
+            }
+          }
+        }
+      },
+      "loop-flow-parameters" : {
+        "acceptable-increase" : 10.0,
+        "ptdf-approximation" : "FIXED_PTDF",
+        "constraint-adjustment-coefficient" : 10.0,
+        "violation-cost" : 10.0,
+        "countries" : [ "FR", "ES", "PT" ]
+      },
+      "mnec-parameters" : {
+        "acceptable-margin-decrease" : 50.0,
+        "violation-cost" : 10.0,
+        "constraint-adjustment-coefficient" : 1.0
+      },
+      "relative-margins-parameters" : {
+        "ptdf-boundaries" : [ "{FR}-{BE}", "{FR}-{DE}", "{BE}-{NL}", "{NL}-{DE}", "{DE}-{PL}", "{DE}-{CZ}", "{DE}-{AT}", "{PL}-{CZ}", "{PL}-{SK}", "{CZ}-{SK}", "{CZ}-{AT}", "{AT}-{HU}", "{AT}-{SI}", "{SI}-{HR}", "{SK}-{HU}", "{HU}-{RO}", "{HU}-{HR}", "{BE}-{22Y201903144---9}-{DE}+{22Y201903145---4}" ],
+        "ptdf-approximation" : "FIXED_PTDF",
+        "ptdf-sum-lower-bound" : 0.01
+      }
+    }
+  }
+}
