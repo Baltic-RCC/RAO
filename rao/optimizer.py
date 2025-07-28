@@ -54,20 +54,14 @@ class Optimizer:
             logger.info("Loading parameters from in-memory BytesIO buffer")
             self.parameters = pypowsybl.rao.Parameters()
             self.parameters.load_from_buffer_source(path)
-
-
+            logger.info("Parameters loaded successfully from in-memory BytesIO stream")
         elif isinstance(path, str) or isinstance(path, os.PathLike):
             logger.info(f"Loading parameters from file: {path}")
             self.parameters = pypowsybl.rao.Parameters()
             self.parameters.load_from_file_source(parameters_file=str(path))
-
+            logger.info(f"Parameters loaded successfully from: {path}")
         else:
             raise TypeError("Unsupported path type for load_parameters(): expected str or BytesIO")
-
-        if isinstance(path, BytesIO):
-            logger.info("Parameters loaded successfully from in-memory BytesIO stream")
-        else:
-            logger.info(f"Parameters loaded successfully from: {path}")
 
     def load_crac(self):
         if isinstance(self.crac, str):
@@ -91,6 +85,7 @@ class Optimizer:
 
     @performance_counter(units='seconds')
     def run(self):
+        logger.debug(f"Starting the RAO, loading the parameters")
         self.load_parameters()
         self.load_crac()
         logger.info(f"Starting optimization")
