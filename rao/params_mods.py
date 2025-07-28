@@ -11,7 +11,7 @@ def get_parameter_override_stream(time_horizon: str) -> ParameterOverride | None
     if time_horizon != "ID":
         return None
 
-    original_path = Path(__file__).parent / "parameters_v30.json"
+    original_path = Path(__file__).parent / "rao_v30.json"
     keys_path = [
         "extensions",
         "open-rao-search-tree-parameters",

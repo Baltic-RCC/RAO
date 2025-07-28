@@ -1,11 +1,9 @@
-import io
-import json
 import os
 import pypowsybl
 import pandas as pd
 import logging
 from common.decorators import performance_counter
-from rao.loadflow_tool_settings import LF_PARAMETERS, CGMES_IMPORT_PARAMETERS
+from rao.parameters.loadflow import LF_PARAMETERS, CGMES_IMPORT_PARAMETERS
 from common.helper import repackage_model_zip
 from loguru import logger
 from io import BytesIO
@@ -47,7 +45,7 @@ class Optimizer:
             path = getattr(self, "parameters_path", None)
             if not path:
                 base_dir = os.path.dirname(os.path.abspath(__file__))
-                path = os.path.join(base_dir, "parameters_v30.json")
+                path = os.path.join(base_dir, "rao_v30.json")
 
         if isinstance(path, BytesIO):
             path.seek(0)

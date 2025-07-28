@@ -1,29 +1,20 @@
 import uuid
 from datetime import datetime, timezone
-from textwrap import indent
-
 from pika import BasicProperties
 from io import BytesIO
 import pandas as pd
 import json
 import pypowsybl
-from typing_extensions import override
-
 import config
-import re
 from pathlib import Path
 from common.object_storage import ObjectStorage
 from common.config_parser import parse_app_properties
 from common.decorators import performance_counter
 from rao.crac.builder import CracBuilder
 from rao.optimizer import Optimizer
-from rao.loadflow_tool_settings import CGMES_IMPORT_PARAMETERS
+from rao.parameters.loadflow import CGMES_IMPORT_PARAMETERS
 from loguru import logger
-from rao.params_utils import ParameterOverride
 from rao.params_mods import get_parameter_override_stream
-from copy import deepcopy
-from typing import Dict
-
 
 parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
 parse_app_properties(caller_globals=globals(),
@@ -191,7 +182,7 @@ class HandlerVirtualOperator:
                                                                  parameters=CGMES_IMPORT_PARAMETERS)
 
         # Get original parameter file path
-        parameters_path = Path(__file__).parent / "parameters_v30.json"
+        parameters_path = Path(__file__).parent / "rao_v30.json"
         override_stream = None
 
         # If time horizon is ID, create modified temporary parameter file
