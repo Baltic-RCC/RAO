@@ -150,7 +150,10 @@ class HandlerVirtualOperator:
 
         # Get all violations from SAR profile
         violations = sar_data.key_tableview("PowerFlowResult.isViolation")
-        violations = violations[violations['PowerFlowResult.isViolation'] == 'true']
+        violations = violations[violations["PowerFlowResult.isViolation"] == "true"]
+
+        # Filter by violation deadband
+        violations = violations[violations["PowerFlowResult.value"] >= VIOLATION_THRESHOLD_PERCENT]
 
         # Filter to current violations only if defined by configuration
         if self.current_violations_only:
@@ -161,8 +164,10 @@ class HandlerVirtualOperator:
 
         # Exit if there is no relevant violations
         if violations.empty:
-            logger.warning("No violations found in SAR profile, exiting VirtualOperator process")
+            logger.info("No violations found in SAR profile, exiting VirtualOperator process")
             return message, properties
+        else:
+            logger.info(f"SAR profile contains number of relevant violations: {len(violations)}")
 
         # Get other input data from object storage
         input_file_objects = self.get_input_profiles()
@@ -199,6 +204,7 @@ class HandlerVirtualOperator:
         for mrid, data in violations.groupby("ContingencyPowerFlowResult.Contingency"):
 
             logger.info(f"Processing contingency: {mrid} with {len(data)} violations")
+            logger.info(f"Violations on network elements: {data['PowerFlowResult.EquipmentName'].to_list()}")
 
             # Build CRAC for each contingency
             self.crac = crac_service.build_crac(contingency_ids=[mrid])
@@ -236,11 +242,17 @@ class HandlerVirtualOperator:
             logger.info(f"Post-processing results")
             results = self.post_process_results(results=pd.json_normalize(results))
 
+            # Flag CNECs which were identified as violations from received SAR profile
+            results['cnec.sourceViolation'] = results['cnec.networkElementId'].isin(data['PowerFlowResult.ACDCTerminal'].apply(lambda x: f"_{x}"))
+
             # Logging status of successful optimization process for contingency
-            logger.success(f"Optimization successful for contingency {mrid}")
+            logger.success(f"Optimization successful for contingency: {mrid}")
 
             # Include message properties as meta
             results['rmq'] = [properties.headers] * len(results)
+
+            # Include optimization main relevant settings
+            results['settings'] = [{"objective-function": optimizer_settings.get("objective-function.type")}] * len(results)
 
             # Send results to Elastic
             data_to_send = results.astype(object).where(pd.notna(results), None).to_dict("records")
@@ -250,7 +262,7 @@ class HandlerVirtualOperator:
                 json_message_list=data_to_send,
             )
 
-        logger.info(f"Message handling completed successfully")
+        logger.success(f"Message handling completed successfully")
 
         return message, properties
 

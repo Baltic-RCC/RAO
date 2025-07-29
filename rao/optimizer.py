@@ -53,7 +53,7 @@ class Optimizer:
             logger.info("Loading parameters from in-memory BytesIO buffer")
             self.parameters = pypowsybl.rao.Parameters()
             self.parameters.load_from_buffer_source(self.parameters_source)
-            logger.info("Parameters loaded successfully from in-memory BytesIO stream")
+            logger.info("Parameters loaded successfully from in-memory BytesIO buffer")
         elif isinstance(self.parameters_source, str) or isinstance(self.parameters_source, os.PathLike):
             logger.info(f"Loading parameters from file: {self.parameters_source}")
             self.parameters = pypowsybl.rao.Parameters()
