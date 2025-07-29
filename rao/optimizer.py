@@ -13,16 +13,18 @@ class Optimizer:
 
     def __init__(self,
                  network: pypowsybl.network.Network,
-                 crac: str | io.BytesIO,
+                 crac: str | BytesIO,
+                 parameters_source: str | BytesIO | None = None,
                  debug: bool = False,
-                 parameters_path = None):
+                 ):
 
         self.network = network
         self.crac = crac
+        self.parameters_source = parameters_source
         self.debug = debug
+
         self.parameters = None
         self.results = None
-        self.parameters_path = parameters_path
 
         self.runner = pypowsybl.rao.create_rao()
 
@@ -34,32 +36,31 @@ class Optimizer:
     def cost_results(self):
         return pd.json_normalize(self.results.to_json()['costResults'])
 
-    def load_parameters(self, path: str = None):
+    def load_parameters(self):
         """
         Loads optimization parameters from:
             - BytesIO buffer via load_from_buffer_source() (default for ID)
             - File path via load_from_file_source() (default for 1D)
         """
 
-        if path is None:
-            path = getattr(self, "parameters_path", None)
-            if not path:
-                base_dir = os.path.dirname(os.path.abspath(__file__))
-                path = os.path.join(base_dir, "rao_v30.json")
+        if not self.parameters_source:
+            from rao.parameters.manager import RaoSettingsManager
+            optimizer_settings = RaoSettingsManager()
+            self.parameters_source = optimizer_settings.to_bytesio()
 
-        if isinstance(path, BytesIO):
-            path.seek(0)
+        if isinstance(self.parameters_source, BytesIO):
+            self.parameters_source.seek(0)
             logger.info("Loading parameters from in-memory BytesIO buffer")
             self.parameters = pypowsybl.rao.Parameters()
-            self.parameters.load_from_buffer_source(path)
+            self.parameters.load_from_buffer_source(self.parameters_source)
             logger.info("Parameters loaded successfully from in-memory BytesIO stream")
-        elif isinstance(path, str) or isinstance(path, os.PathLike):
-            logger.info(f"Loading parameters from file: {path}")
+        elif isinstance(self.parameters_source, str) or isinstance(self.parameters_source, os.PathLike):
+            logger.info(f"Loading parameters from file: {self.parameters_source}")
             self.parameters = pypowsybl.rao.Parameters()
-            self.parameters.load_from_file_source(parameters_file=str(path))
-            logger.info(f"Parameters loaded successfully from: {path}")
+            self.parameters.load_from_file_source(parameters_file=str(self.parameters_source))
+            logger.info(f"Parameters loaded successfully from: {self.parameters_source}")
         else:
-            raise TypeError("Unsupported path type for load_parameters(): expected str or BytesIO")
+            raise TypeError("Unsupported parameter source for load_parameters(): expected str or BytesIO")
 
     def load_crac(self):
         if isinstance(self.crac, str):
