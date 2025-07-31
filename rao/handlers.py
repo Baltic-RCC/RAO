@@ -127,22 +127,22 @@ class HandlerVirtualOperator:
         Process received SAR profile
         """
         # Get unique x-message-id from headers, if not there - create
-        message_id = properties.headers.get('x-message-id', str(uuid.uuid4()))
+        message_id = properties.headers.get('message-id', str(uuid.uuid4()))
         if getattr(config.initialize_logging, 'elastic_handler', None):
             config.initialize_logging.elastic_handler.extra.update({
-                'x-message-id': message_id,
-                'x-source-module': properties.headers.get('x-source-module', 'unknown')
+                'message-id': message_id,
+                'source-module': properties.headers.get('source-module', 'unknown')
             })
         logger.info(f"Handling message with id: {message_id}")
 
         # Get metadata from properties
-        self.scenario_timestamp = getattr(properties, 'headers').get('scenario_time', datetime.now(timezone.utc))
+        self.scenario_timestamp = getattr(properties, 'headers').get('scenario-time', datetime.now(timezone.utc))
         if isinstance(self.scenario_timestamp, str):
             self.scenario_timestamp = datetime.fromisoformat(self.scenario_timestamp)
 
         # Store SAR to BytesIO object and load to triplets to scan violations
         sar = BytesIO(message)
-        sar.name = f"{getattr(properties, 'headers').get('project_name', 'undefined')}.xml"
+        sar.name = f"{getattr(properties, 'headers').get('project-name', 'undefined')}.xml"
         logger.info(f"Loading received SAR profile")
         sar_data = pd.read_RDF([sar])
         for key, value in sar_data.types_dict().items():
@@ -179,7 +179,7 @@ class HandlerVirtualOperator:
             logger.debug(f"Loaded objects: {value} {key}")
 
         # Get network model from object storage
-        content_reference = properties.headers.get('content_reference', None)
+        content_reference = properties.headers.get('content-reference', None)
         if not content_reference:
             logger.error(f"RMQ message does not have content reference in headers")
             return message, properties
@@ -191,7 +191,7 @@ class HandlerVirtualOperator:
         # Get default optimization parameters
         optimizer_settings = RaoSettingsManager()
         # Modify parameters if time horizon is ID
-        if properties.headers.get('time_horizon') == 'ID':
+        if properties.headers.get('time-horizon') == 'ID':
             optimizer_settings.set(
                 path_or_dict={"extensions.open-rao-search-tree-parameters.topological-actions-optimization.max-curative-search-tree-depth": 1})
 
@@ -215,7 +215,7 @@ class HandlerVirtualOperator:
 
             # Store built CRAC files in S3 storage
             crac_object = BytesIO(json.dumps(self.crac).encode('utf-8'))
-            crac_object.name = f"RAO/CRAC_{properties.headers['time_horizon']}_{self.scenario_timestamp:%Y%m%dT%H%M}_CO_{mrid}.json"
+            crac_object.name = f"RAO/CRAC_{properties.headers['time-horizon']}_{self.scenario_timestamp:%Y%m%dT%H%M}_CO_{mrid}.json"
             self.object_storage.s3_service.upload_object(file_path_or_file_object=crac_object,
                                                          bucket_name=S3_BUCKET_RESULTS,
                                                          metadata=properties.headers)
@@ -278,9 +278,9 @@ if __name__ == '__main__':
         "sender": "TSOX",
         "senderApplication": "APPX",
         "service": "INPUT-DATA",
-        "scenario_time": datetime(2025, 7, 22, 5, 30),
-        "time_horizon": "ID",
-        "content_reference": "EMFOS/RMM/RMM_1D_001_20250722T0530Z_BA_ce84d8cf-6ae2-4237-9ab9-34838dcff6b8.zip",
+        "scenario-time": datetime(2025, 7, 22, 5, 30),
+        "time-horizon": "ID",
+        "content-reference": "EMFOS/RMM/RMM_1D_001_20250722T0530Z_BA_ce84d8cf-6ae2-4237-9ab9-34838dcff6b8.zip",
     }
     properties = BasicProperties(
         content_type='application/octet-stream',
