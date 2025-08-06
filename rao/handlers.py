@@ -221,7 +221,9 @@ class HandlerVirtualOperator:
                 path_or_dict={"extensions.open-rao-search-tree-parameters.topological-actions-optimization.max-curative-search-tree-depth": 1})
 
         # Create CRAC service
-        crac_service = CracBuilder(data=input_files_data, network=pd.read_RDF(network_object))
+        logger.info(f"Loading network to triplets for CRAC service")
+        network_triplets = pd.read_RDF(network_object)
+        crac_service = CracBuilder(data=input_files_data, network=network_triplets)
         crac_service.get_limits()  # get limits from model and store in CRAC service object
 
         # Group by contingency id
