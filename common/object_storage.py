@@ -32,6 +32,7 @@ class ObjectStorage:
     def query(self,
               metadata_query: Dict,
               range_query: List[Dict] | None = None,
+              query_filter: List[Dict] | None = None,
               index: str = ELASTIC_METADATA_INDEX,
               return_payload: bool = False,
               size: str = '10000',
@@ -67,6 +68,10 @@ class ObjectStorage:
 
         # Build a query
         query = {"bool": {"must": bool_must_list}}
+
+        # Include query filter if defined
+        if query_filter:
+            query["bool"]["filter"] = query_filter
 
         # Return query results
         response = self.elastic_service.client.search(index=index, query=query, size=size, sort=sort, scroll=scroll)
@@ -113,18 +118,21 @@ class ObjectStorage:
 
         return content
 
-    def get_latest_input_data(self,
-                              type_keyword: List,
-                              scenario_timestamp: str | datetime.datetime,  # in case of str type it should be ISO compatible
-                              entity: List | None = None,
-                              index: str = ELASTIC_METADATA_INDEX,
-                              ):
+    def get_input_data_for_timestamp(self,
+                                     type_keyword: List,
+                                     scenario_timestamp: str | datetime.datetime,
+                                     # in case of str type it should be ISO compatible
+                                     entity: List | None = None,
+                                     index: str = ELASTIC_METADATA_INDEX,
+                                     ):
 
         logger.info(f"Retrieving input data files of keyword: {type_keyword}")
+        logger.info(f"Requested timestamp: {scenario_timestamp.isoformat()}")
 
         # Build Elastic query from given scenario_timestamp and metadata
         metadata_query = {"keyword": type_keyword}
         if entity:
+            logger.info(f"Requested entities: {entity}")
             metadata_query['entity'] = entity
 
         range_query = [
@@ -138,23 +146,72 @@ class ObjectStorage:
                                     index=index,
                                     )
 
-        files_downloaded = []
-        if files_metadata:
-            # Sort by latest version
-            df = pd.json_normalize(files_metadata)
-            # TODO need to handle if there are multiple files with same version - then use created atrribute
-            df = df.sort_values(by="Model.version", ascending=True).groupby(["entity", "keyword"]).first()
+        # Convert to dataframe
+        df = pd.json_normalize(files_metadata)
 
-            for file_object in df.to_dict("records"):
+        metadata_with_content = []
+        if not df.empty:
+            # Sort by latest version
+            df = df.sort_values(by=["Model.version", "Model.created"], ascending=[False, False]).groupby(["entity", "keyword"]).first()
+            # Get content
+            for file_object in df.reset_index().to_dict("records"):
                 try:
-                    files_downloaded.append(self.get_content(metadata=file_object))
+                    file_object['content'] = self.get_content(metadata=file_object)
+                    metadata_with_content.append(file_object)
                 except Exception as e:
                     logger.error(f"Could not download file for: {file_object}")
                     logger.error(sys.exc_info())
         else:
             logger.warning(f"Requested files not available on Object Storage")
 
-        return files_downloaded
+        return metadata_with_content
+
+    def get_latest_available_input_data(self,
+                                        type_keyword: List,
+                                        scenario_timestamp: str | datetime.datetime,
+                                        range_filter: str = "now-2w",
+                                        entity: List | None = None,
+                                        index: str = ELASTIC_METADATA_INDEX,
+                                        ):
+
+        logger.info(f"Retrieving latest available input data files of keyword: {type_keyword}")
+
+        # Build Elastic query from metadata
+        metadata_query = {"keyword": type_keyword}
+        if entity:
+            logger.info(f"Requested entities: {entity}")
+            metadata_query['entity'] = entity
+
+        query_filter = [
+            {"range": {"startDate": {"gte": range_filter}}},
+            {"range": {"startDate": {"lte": scenario_timestamp}}},
+        ]
+
+        files_metadata = self.query(metadata_query=metadata_query,
+                                    query_filter=query_filter,
+                                    return_payload=False,
+                                    index=index,
+                                    )
+
+        # Convert to dataframe
+        df = pd.json_normalize(files_metadata)
+
+        metadata_with_content = []
+        if not df.empty:
+            # Sort by latest version
+            df = df.sort_values(by=["startDate", "Model.version", "Model.created"], ascending=[False, False, False]).groupby(["entity", "keyword"]).first()
+            # Get content
+            for file_object in df.reset_index().to_dict("records"):
+                try:
+                    file_object['content'] = self.get_content(metadata=file_object)
+                    metadata_with_content.append(file_object)
+                except Exception as e:
+                    logger.error(f"Could not download file for: {file_object}")
+                    logger.error(sys.exc_info())
+        else:
+            logger.warning(f"Requested files not available on Object Storage for filter: {range_filter}")
+
+        return metadata_with_content
 
 
 if __name__ == "__main__":
@@ -166,7 +223,7 @@ if __name__ == "__main__":
     # Test 1
     # response = service.query(metadata_query=test_query, return_payload=True)
     # Test 2
-    latest_files = service.get_latest_input_data(
+    metadata, content = service.get_input_data_for_timestamp(
         entity=["LITGRID"],
         type_keyword=["CO"],
         scenario_timestamp=datetime.datetime(2025, 5, 13, 10, 30)

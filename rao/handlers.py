@@ -6,6 +6,7 @@ from io import BytesIO
 import pandas as pd
 import json
 import pypowsybl
+import itertools
 import config
 from pathlib import Path
 from common.object_storage import ObjectStorage
@@ -45,10 +46,34 @@ class HandlerVirtualOperator:
         self.crac = None
 
     def get_input_profiles(self):
-        content = self.object_storage.get_latest_input_data(type_keyword=["CO", "AE", "RA"],
-                                                            scenario_timestamp=self.scenario_timestamp)
+        requested_profile_types = ["CO", "AE", "RA"]
+        received_profiles = self.object_storage.get_input_data_for_timestamp(type_keyword=requested_profile_types,
+                                                                             scenario_timestamp=self.scenario_timestamp)
 
-        return content
+        if not received_profiles:
+            logger.warning(f"[FALLBACK] Requesting all latest available input data files")
+            received_profiles = self.object_storage.get_latest_available_input_data(
+                type_keyword=requested_profile_types,
+                scenario_timestamp=self.scenario_timestamp,
+            )
+
+        # Validate received profiles
+        df = pd.DataFrame(received_profiles)
+        expected = set(itertools.product(set(requested_profile_types), set(self.network_model_meta['included'])))
+        received = set(zip(df['keyword'], df['entity']))
+        missing = expected - received
+
+        # Apply fallback
+        for element in missing:
+            logger.warning(f"[FALLBACK] Requesting latest available input data for: {element}")
+            fallback_profile = self.object_storage.get_latest_available_input_data(
+                type_keyword=[element[0]],
+                scenario_timestamp=self.scenario_timestamp,
+                entity=[element[1]],
+            )
+            received_profiles.extend(fallback_profile)
+
+        return [profile['content'] for profile in received_profiles]
 
     def get_network_model(self, content_reference: str):
         # Query merge reports
@@ -169,15 +194,6 @@ class HandlerVirtualOperator:
         else:
             logger.info(f"SAR profile contains number of relevant violations: {len(violations)}")
 
-        # Get other input data from object storage
-        input_file_objects = self.get_input_profiles()
-
-        # Load input files and SAR to triplets
-        logger.info(f"Loading additional input data")
-        input_files_data = pd.read_RDF(input_file_objects)
-        for key, value in input_files_data.types_dict().items():
-            logger.debug(f"Loaded objects: {value} {key}")
-
         # Get network model from object storage
         content_reference = properties.headers.get('content-reference', None)
         if not content_reference:
@@ -187,6 +203,15 @@ class HandlerVirtualOperator:
         logger.info(f"Loading network model to pypowsybl")
         self.network = pypowsybl.network.load_from_binary_buffer(buffer=network_object,
                                                                  parameters=CGMES_IMPORT_PARAMETERS)
+
+        # Get other input data from object storage
+        input_file_objects = self.get_input_profiles()
+
+        # Load input files and SAR to triplets
+        logger.info(f"Loading additional input data")
+        input_files_data = pd.read_RDF(input_file_objects)
+        for key, value in input_files_data.types_dict().items():
+            logger.debug(f"Loaded objects: {value} {key}")
 
         # Get default optimization parameters
         optimizer_settings = RaoSettingsManager()
