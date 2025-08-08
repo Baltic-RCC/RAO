@@ -14,6 +14,7 @@ dependencies = [
     "pip>=25.1.1",
     "pydantic>=2.11.5",
     "pypowsybl>=1.12.0",
+    "rdflib>=7.1.4",
     "requests>=2.32.3",
     "setuptools>=80.4.0",
     "triplets>=0.0.11",
