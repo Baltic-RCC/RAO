@@ -15,7 +15,7 @@ class Contingency(BaseModel):
 
 
 class Threshold(BaseModel):
-    unit: Literal['megawatt', 'ampere', 'percent_imax'] = 'ampere'  # Default unit is 'ampere', can be adjusted if needed
+    unit: Literal['megawatt', 'ampere', 'percent_imax', 'kilovolt'] = 'ampere'  # Default unit is 'ampere', can be adjusted if needed
     min: float = 0
     max: float = 0
     side: int = 1  # Default side is 1, can be adjusted if needed
@@ -43,6 +43,10 @@ class FlowCnec(Cnec):
     pass
 
 
+class VoltageCnec(Cnec):
+    pass
+
+
 class TerminalsAction(BaseModel):
     networkElementId: str
     actionType: Literal['open', 'close'] | float = Field(default="open", validation_alias=AliasChoices("normalValue", "actionType"))
@@ -52,9 +56,9 @@ class TerminalsAction(BaseModel):
     def map_to_string_open_close(cls, value: Literal['open', 'close'] | float) -> str:
         if isinstance(value, float):
             if value:
-                return "open"
-            else:
                 return "close"
+            else:
+                return "open"
         return value
 
     @field_serializer("networkElementId", when_used='unless-none')
@@ -109,6 +113,7 @@ class Crac(BaseModel):
     networkElementsNamePerId: Dict = Field(default_factory=dict)
     contingencies: List[Contingency] = Field(default_factory=list)
     flowCnecs: List[FlowCnec] = Field(default_factory=list)
+    voltageCnecs: List[VoltageCnec] = Field(default_factory=list)
     networkActions: List[NetworkAction] = Field(default_factory=list)
 
     @field_serializer("flowCnecs", mode='plain')
