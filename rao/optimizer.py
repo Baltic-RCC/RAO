@@ -3,7 +3,7 @@ import pypowsybl
 import pandas as pd
 import logging
 from common.decorators import performance_counter
-from rao.parameters.loadflow import LF_PARAMETERS, CGMES_IMPORT_PARAMETERS
+from rao.parameters.manager import LoadflowSettingsManager
 from common.helper import repackage_model_zip
 from loguru import logger
 from io import BytesIO
@@ -77,7 +77,8 @@ class Optimizer:
             logger.debug(f"Removed network variant: {var}")
 
     def solve_loadflow(self):
-        result = pypowsybl.loadflow.run_ac(network=self.network, parameters=LF_PARAMETERS)
+        result = pypowsybl.loadflow.run_ac(network=self.network,
+                                           parameters=LoadflowSettingsManager().build_pypowsybl_parameters())
         logger.info(f"Loadflow status: {result[0].status_text}")
 
         return result

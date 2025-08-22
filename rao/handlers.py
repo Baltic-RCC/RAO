@@ -14,8 +14,8 @@ from common.config_parser import parse_app_properties
 from common.decorators import performance_counter
 from rao.crac.builder import CracBuilder
 from rao.parameters.manager import RaoSettingsManager
+from rao.parameters.manager import LoadflowSettingsManager
 from rao.optimizer import Optimizer
-from rao.parameters.loadflow import CGMES_IMPORT_PARAMETERS
 from loguru import logger
 
 
@@ -201,8 +201,9 @@ class HandlerVirtualOperator:
             return message, properties
         network_object = self.get_network_model(content_reference=content_reference)
         logger.info(f"Loading network model to pypowsybl")
-        self.network = pypowsybl.network.load_from_binary_buffer(buffer=network_object,
-                                                                 parameters=CGMES_IMPORT_PARAMETERS)
+        self.network = pypowsybl.network.load_from_binary_buffer(
+            buffer=network_object,
+            parameters=LoadflowSettingsManager().config['CGMES_IMPORT_PARAMETERS'])
 
         # Get other input data from object storage
         input_file_objects = self.get_input_profiles()

@@ -1,0 +1,18 @@
+{
+  "CGMES_IMPORT_PARAMETERS": {
+    "iidm.import.cgmes.import-node-breaker-as-bus-breaker": "False",
+    "iidm.import.cgmes.source-for-iidm-id": "rdfID"
+  },
+  "LF_PROVIDER": {
+    "slackBusCountryFilter": "LT",
+    "maxNewtonRaphsonIterations": "20",
+    "maxOuterLoopIterations": "40",
+    "maxVoltageMismatch": "1.0E-4"
+  },
+  "LF_PARAMETERS": {
+    "write_slack_bus": true,
+    "distributed_slack": false,
+    "countries_to_balance": ["LT", "LV", "EE"],
+    "connected_component_mode": "MAIN"
+  }
+}
