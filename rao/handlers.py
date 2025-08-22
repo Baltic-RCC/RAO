@@ -262,6 +262,12 @@ class HandlerVirtualOperator:
 
             # Serialize results to json
             results = optimizer.results.to_json()
+            if results['computationStatus'] == 'failure':
+                logger.error(f"Optimizer failed computation: {results}")
+                logger.error(f"Enable pypowsybl logs for more information")
+                continue
+
+            # Check if there are any optimized remedial actions
             if not results['networkActionResults'] and not results['rangeActionResults']:
                 logger.warning(f"No possible actions proposed by optimizer")
 

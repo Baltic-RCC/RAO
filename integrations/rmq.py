@@ -2,6 +2,7 @@ import functools
 import time
 import pika
 import config
+import traceback
 from typing import List
 from concurrent.futures import ThreadPoolExecutor
 from loguru import logger
@@ -375,9 +376,9 @@ class RMQConsumer:
                 properties.content_type = content_type
                 logger.info(f"Message converted")
             except Exception as error:
-                logger.error(f"Message conversion failed: {error}", exc_info=True)
+                logger.error(f"Message conversion failed: {error}\n{traceback.format_exc()}")
                 ack = False
-                self._channel.basic_reject(basic_deliver.delivery_tag, requeue=True)
+                self._channel.basic_reject(basic_deliver.delivery_tag, requeue=False)
                 # self.connection.close()
                 # self.stop()
 
@@ -388,9 +389,10 @@ class RMQConsumer:
                     logger.info(f"Handling message with handler: {message_handler.__class__.__name__}")
                     body, properties = message_handler.handle(body, properties=properties, channel=self._channel)
                 except Exception as error:
-                    logger.error(f"Message handling failed: {error}", exc_info=True)
+                    logger.error(f"Message handling failed: {error}\n{traceback.format_exc()}")
+                    logger.exception("Message handling failed, see traceback in document")
                     ack = False
-                    self._channel.basic_reject(basic_deliver.delivery_tag, requeue=True)
+                    self._channel.basic_reject(basic_deliver.delivery_tag, requeue=False)
                     # self.connection.close()
                     # self.stop()
 

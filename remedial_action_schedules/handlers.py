@@ -1,5 +1,6 @@
 from pika import BasicProperties
 import uuid
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -326,13 +327,16 @@ class RemedialActionScheduleToElasticHandler:
         # JSON normalize and transform to DataFrame
         df = self.normalize_cim_payload(data)
 
+        # TODO need to get CO and RA from object storage and merge
+
         # Convert to dictionary
         data_to_send = df.to_dict(orient='records')
 
-        response = self.elastic_service.send_to_elastic(
+        response = self.elastic_service.send_to_elastic_bulk(
             index=ELASTIC_METADATA_INDEX,
-            json_message=data_to_send,
-            id=metadata_object.get('identifier', None)
+            json_message_list=data_to_send,
+            id_from_metadata=True,
+            id_metadata_list=["@id"],
         )
 
         logger.info(f"Message sending to Elastic successful: {response}")
@@ -341,23 +345,50 @@ class RemedialActionScheduleToElasticHandler:
 
 
 if __name__ == "__main__":
-    rdf_xml = r"C:\Users\martynas.karobcikas\Downloads\ras-example.xml"
-    # rdf_xml = r"C:\Users\martynas.karobcikas\Documents\Python projects\RAO\test-data\TC1_assessed_elements.xml"
-    # rdf_xml = r"C:\Users\martynas.karobcikas\Documents\Python projects\RAO\test-data\TC1_contingencies.xml"
-    # rdf_xml = r"C:\Users\martynas.karobcikas\Documents\Python projects\RAO\test-data\TC1_remedial_actions.xml"
-    g = Graph()
-    g.parse(rdf_xml, format="xml")  # your RDF/XML file
+    # rdf_xml = r"C:\Users\martynas.karobcickas\Downloads\ras-example.xml"
+    # rdf_xml = r"C:\Users\martynas.karobcickas\Documents\Python projects\RAO\test-data\TC1_assessed_elements.xml"
+    # rdf_xml = r"C:\Users\martynas.karobcickas\Documents\Python projects\RAO\test-data\TC1_contingencies.xml"
+    # rdf_xml = r"C:\Users\martynas.karobcickas\Documents\Python projects\RAO\test-data\TC1_remedial_actions.xml"
+    # g = Graph()
+    # g.parse(rdf_xml, format="xml")  # Put your RDF/XML file
 
-    result = convert_cim_rdf_to_json(rdf_xml, root_class=["RemedialActionSchedule"], key_mode='local')
-    # result = convert_cim_rdf_to_json(rdf_xml, root_class=["RemedialActionSchedule"], key_mode='qualified')
-    # result = convert_cim_rdf_to_json(rdf_xml, root_class=["GridStateAlterationRemedialAction"], key_mode='local')
-    # result = convert_cim_rdf_to_json(rdf_xml, root_class=["OrdinaryContingency", "ExceptionalContingency"], key_mode='local')
+    # result = convert_cim_rdf_to_json(rdf_xml, root_class=["RemedialActionSchedule"], key_mode="local")
+    # result = convert_cim_rdf_to_json(rdf_xml, root_class=["RemedialActionSchedule"], key_mode="qualified")
+    # result = convert_cim_rdf_to_json(rdf_xml, root_class=["GridStateAlterationRemedialAction"], key_mode="local")
+    # result = convert_cim_rdf_to_json(rdf_xml, root_class=["OrdinaryContingency", "ExceptionalContingency"], key_mode="local")
 
-    import json
-    print(json.dumps(result, indent=2))
+    # print json
+    # print(json.dumps(result, indent=2))
 
-    with open("test.json", "w") as f:
-        json.dump(result, f, ensure_ascii=False, indent=4)
+    # with open("test.json", "w") as f:
+    #     json.dump(result, f, ensure_ascii=False, indent=4)
+    # df = RemedialActionScheduleToElasticHandler.normalize_cim_payload(result)
+    # print(df.head())
 
-    df = RemedialActionScheduleToElasticHandler.normalize_cim_payload(result)
-    print(df.head())
+    # Define RMQ test message
+    headers = {
+        "baCorrelationID": f"{uuid.uuid4()}",
+        "baseMessageID": f"{uuid.uuid4()}",
+        "businessType": "CSA-INPUT",
+        "messageID": f"{uuid.uuid4()}",
+        "sendTimestamp": datetime.utcnow().isoformat(),
+        "sender": "TSOX",
+        "senderApplication": "APPX",
+        "service": "INPUT-DATA",
+    }
+
+    properties = BasicProperties(
+        content_type="application/octet-stream",
+        delivery_mode=2,
+        priority=4,
+        message_id=f"{uuid.uuid4()}",
+        timestamp=147728025,
+        headers=headers,
+    )
+
+    with open(r"C:\Users\martynas.karobcickas\Downloads\ras-example.xml", "rb") as file:
+        file_bytes = file.read()
+
+    # Create instance
+    service = RemedialActionScheduleToElasticHandler()
+    result = service.handle(message=file_bytes, properties=properties)
