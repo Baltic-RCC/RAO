@@ -205,6 +205,16 @@ class HandlerVirtualOperator:
             buffer=network_object,
             parameters=LoadflowSettingsManager().config['CGMES_IMPORT_PARAMETERS'])
 
+        # Solve initial loadflow on retrieved model
+        logger.info(f"Solve initial loadflow analysis")
+        lf_result = pypowsybl.loadflow.run_ac(
+            network=self.network,
+            parameters=LoadflowSettingsManager().build_pypowsybl_parameters())
+        logger.info(f"Loadflow status: {lf_result[0]}")
+        if lf_result[0].status.value:
+            logger.error(f"Initial load flow computation failed, exiting message handling")
+            return message, properties
+
         # Get other input data from object storage
         input_file_objects = self.get_input_profiles()
 
