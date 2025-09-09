@@ -6,10 +6,10 @@ CGMES_IMPORT_PARAMETERS = {
 }
 
 LF_PROVIDER = {
-    # 'slackBusSelectionMode': 'MOST_MESHED',
+    'slackBusSelectionMode': 'LARGEST_GENERATOR',
     # 'slackBusesIds': '',
     # 'lowImpedanceBranchMode': 'REPLACE_BY_ZERO_IMPEDANCE_LINE',
-    # 'voltageRemoteControl': 'True',
+    'voltageRemoteControl': 'True',
     # 'slackDistributionFailureBehavior': 'LEAVE_ON_SLACK_BUS',
     'loadPowerFactorConstant': 'False',
     # 'plausibleActivePowerLimit': '5000.0',
@@ -20,15 +20,15 @@ LF_PROVIDER = {
     'maxNewtonRaphsonIterations': '15',
     'maxOuterLoopIterations': '30',
     # 'newtonRaphsonConvEpsPerEq': '1.0E-4',
-    # 'voltageInitModeOverride': 'VOLTAGE_MAGNITUDE',
-    'transformerVoltageControlMode': 'AFTER_GENERATOR_VOLTAGE_CONTROL',  # incremental mode in some cases separates parallel trafos taps
-    # 'shuntVoltageControlMode': 'INCREMENTAL_VOLTAGE_CONTROL',
+    'voltageInitModeOverride': 'FULL_VOLTAGE',
+    'transformerVoltageControlMode': 'INCREMENTAL_VOLTAGE_CONTROL',
+    'shuntVoltageControlMode': 'INCREMENTAL_VOLTAGE_CONTROL',
     # 'minPlausibleTargetVoltage': '0.8',
     # 'maxPlausibleTargetVoltage': '1.2',
     # 'minRealisticVoltage': '0.5',
     # 'maxRealisticVoltage': '2.0',
     # 'reactiveRangeCheckMode': 'MAX',
-    'lowImpedanceThreshold': '1.0E-5',
+    'lowImpedanceThreshold': '3.0E-5',
     # 'networkCacheEnabled': 'False',
     # 'svcVoltageMonitoring': 'True',
     # 'stateVectorScalingMode': None,
@@ -68,18 +68,18 @@ LF_PROVIDER = {
     # 'acSolverType': 'NEWTON_RAPHSON',
     # 'maxNewtonKrylovIterations': '100',
     # 'newtonKrylovLineSearch': 'False',
-    # 'referenceBusSelectionMode': 'FIRST_SLACK',  # GENERATOR_REFERENCE_PRIORITY
+    'referenceBusSelectionMode': 'GENERATOR_REFERENCE_PRIORITY',  # FIRST_SLACK
     # 'writeReferenceTerminals': 'True',
-    # 'voltageTargetPriorities': 'GENERATOR,TRANSFORMER,SHUNT',
+    'voltageTargetPriorities': 'GENERATOR,TRANSFORMER,SHUNT',
 }
 
 LF_PARAMETERS = pypowsybl.loadflow.Parameters(
     voltage_init_mode=pypowsybl.loadflow.VoltageInitMode.UNIFORM_VALUES,
-    transformer_voltage_control_on=False,
+    transformer_voltage_control_on=True,
     use_reactive_limits=True,
     phase_shifter_regulation_on=False,
     twt_split_shunt_admittance=False,
-    shunt_compensator_voltage_control_on=False,
+    shunt_compensator_voltage_control_on=True,
     read_slack_bus=False,
     write_slack_bus=True,
     distributed_slack=True,
