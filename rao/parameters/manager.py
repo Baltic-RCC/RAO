@@ -40,6 +40,10 @@ class LoadflowSettingsManager:
         # Decide override path from arg or env
         env_path = os.environ.get('LOADFLOW_CONFIG_OVERRIDE_PATH')
         self.override_path = Path(override_path or env_path) if (override_path or env_path) else None
+        if self.override_path:
+            logger.info(f"Loadflow settings override path: {self.override_path}")
+        else:
+            logger.info("Using default loadflow settings")
 
         # Build defaults snapshot (dict-based), then merge overrides if any
         base = {
@@ -242,6 +246,8 @@ class RaoSettingsManager:
 
     RAO_PARAMETERS_VERSION_MAP = {
         "1.11.0": f"{Path(__file__).parent.joinpath('rao_v30.json')}",
+        "1.11.1": f"{Path(__file__).parent.joinpath('rao_v30.json')}",
+        "1.11.2": f"{Path(__file__).parent.joinpath('rao_v30.json')}",
         "1.12.0": f"{Path(__file__).parent.joinpath('rao_v31.json')}",
     }
 

@@ -40,6 +40,9 @@ class HandlerVirtualOperator:
         except Exception as e:
             logger.error(f"Failed to initialize ObjectStorage service: {e}")
 
+        # Loading configuration
+        self.lf_settings_manager = LoadflowSettingsManager()
+
         # Metadata
         self.scenario_timestamp = None
         self.network_model_meta = None
@@ -194,6 +197,14 @@ class HandlerVirtualOperator:
         else:
             logger.info(f"SAR profile contains number of relevant violations: {len(violations)}")
 
+        # Exit if there are more unique contingencies to be optimized than configured limit
+        if 'ContingencyPowerFlowResult.Contingency' in violations.columns:
+            _contingencies_count = len(violations['ContingencyPowerFlowResult.Contingency'].unique())
+            logger.info(f"SAR profile contains number of unique contingencies: {_contingencies_count}")
+            if _contingencies_count > CONTINGENCIES_COUNT_THRESHOLD:
+                logger.error("Number of unique contingencies is above threshold and message can not be processed")
+                return message, properties
+
         # Get network model from object storage
         content_reference = properties.headers.get('content-reference', None)
         if not content_reference:
@@ -203,13 +214,13 @@ class HandlerVirtualOperator:
         logger.info(f"Loading network model to pypowsybl")
         self.network = pypowsybl.network.load_from_binary_buffer(
             buffer=network_object,
-            parameters=LoadflowSettingsManager().config['CGMES_IMPORT_PARAMETERS'])
+            parameters=self.lf_settings_manager.config['CGMES_IMPORT_PARAMETERS'])
 
         # Solve initial loadflow on retrieved model
         logger.info(f"Solve initial loadflow analysis")
         lf_result = pypowsybl.loadflow.run_ac(
             network=self.network,
-            parameters=LoadflowSettingsManager().build_pypowsybl_parameters())
+            parameters=self.lf_settings_manager.build_pypowsybl_parameters())
         logger.info(f"Loadflow status: {lf_result[0]}")
         if lf_result[0].status.value:
             logger.error(f"Initial load flow computation failed, exiting message handling")

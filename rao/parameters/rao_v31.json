@@ -59,6 +59,7 @@
             "voltageInitMode" : "UNIFORM_VALUES",
             "transformerVoltageControlOn" : true,
             "phaseShifterRegulationOn" : false,
+            "useReactiveLimits" : true,
             "twtSplitShuntAdmittance" : false,
             "shuntCompensatorVoltageControlOn" : true,
             "readSlackBus" : true,

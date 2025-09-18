@@ -87,7 +87,6 @@ LF_PARAMETERS = pypowsybl.loadflow.Parameters(
     dc_use_transformer_ratio=True,
     countries_to_balance=[],
     connected_component_mode=pypowsybl.loadflow.ConnectedComponentMode.ALL,
-    hvdc_ac_emulation=True,
     dc_power_factor=1.0,
     provider_parameters=LF_PROVIDER,
 )
