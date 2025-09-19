@@ -227,7 +227,7 @@ class CracBuilder:
             cnec = models.FlowCnec(
                 id=f"{ae['IdentifiedObject.mRID']}",
                 name=ae['IdentifiedObject.name'],
-                description=ae['IdentifiedObject.description'],
+                description=ae['IdentifiedObject.description'] or "",
                 networkElementId=ae['AssessedElement.ConductingEquipment'],
                 operator=ae['AssessedElement.AssessedSystemOperator'],
                 thresholds=[models.Threshold()],
