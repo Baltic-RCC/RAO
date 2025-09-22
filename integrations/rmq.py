@@ -3,8 +3,6 @@ import time
 import pika
 import config
 import traceback
-import sys
-import os
 import signal
 from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor
@@ -175,7 +173,7 @@ class SingleMessageConsumer:
                  host: str = RMQ_SERVER,
                  port: int = RMQ_PORT,
                  vhost: str = RMQ_VHOST,
-                 queue: str = RMQ_QUEUE,
+                 queue: str | None = None,
                  username: str = RMQ_USERNAME,
                  password: str = RMQ_PASSWORD,
                  reply_to: Optional[str] = None,
@@ -261,7 +259,7 @@ class SingleMessageConsumer:
         assert self._channel is not None
         self._channel.basic_reject(delivery_tag, requeue=False)
 
-    def run_once(self) -> int:
+    def run(self) -> int:
         """
         Exit codes:
           0 -> processed OK or queue empty
@@ -278,7 +276,7 @@ class SingleMessageConsumer:
             method, properties, body = self._basic_get()
 
             if not method:
-                logger.info(f"No message available in queue '{self._queue}', exiting")
+                logger.warning(f"No message available in queue '{self._queue}', exiting")
                 return 0
 
             delivery_tag = method.delivery_tag
