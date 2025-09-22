@@ -3,7 +3,10 @@ import time
 import pika
 import config
 import traceback
-from typing import List
+import sys
+import os
+import signal
+from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor
 from loguru import logger
 from common.config_parser import parse_app_properties
@@ -152,6 +155,177 @@ class BlockingClient:
     def __del__(self):
         # Destructor to ensure the connection is closed properly
         self.close()
+
+
+class SingleMessageConsumer:
+    """
+    One-shot worker aligned with RMQConsumer style:
+      - Connects using pika.BlockingConnection
+      - Pulls exactly ONE message via basic_get(auto_ack=False)
+      - Applies message_converter.convert(...)
+      - Runs each handler.handle(...)
+      - Optionally publishes to reply_to
+      - ACKs on success; REJECTs on failure (requeue=False to match RMQConsumer)
+      - Closes and exits
+
+    Intended for KEDA ScaledJob: one job = one message.
+    """
+
+    def __init__(self,
+                 host: str = RMQ_SERVER,
+                 port: int = RMQ_PORT,
+                 vhost: str = RMQ_VHOST,
+                 queue: str = RMQ_QUEUE,
+                 username: str = RMQ_USERNAME,
+                 password: str = RMQ_PASSWORD,
+                 reply_to: Optional[str] = None,
+                 message_handlers: Optional[List[object]] = None,
+                 message_converter: Optional[object] = None,
+                 heartbeat: int = 0,  # safer for long jobs
+                 socket_timeout: Optional[float] = None,
+                 blocked_connection_timeout: float = 600.0,
+                 connection_attempts: int = 5,
+                 retry_delay: int = 3,
+                 log_body: bool = False,
+                 ):
+        self._host = host
+        self._port = int(port)
+        self._vhost = vhost
+        self._queue = queue
+        self._username = username
+        self._password = password
+
+        self.reply_to = reply_to
+        self.message_handlers = message_handlers or []
+        self.message_converter = message_converter
+        self.log_body = log_body
+
+        self._heartbeat = heartbeat
+        self._socket_timeout = socket_timeout
+        self._blocked_connection_timeout = blocked_connection_timeout
+        self._connection_attempts = connection_attempts
+        self._retry_delay = retry_delay
+
+        self._connection = None
+        self._channel = None
+        self._in_shutdown = False
+
+        # Graceful shutdown: finish current message, then exit
+        signal.signal(signal.SIGTERM, self._on_term_signal)
+        signal.signal(signal.SIGINT, self._on_term_signal)
+
+    def connect(self):
+        params = pika.ConnectionParameters(
+            host=self._host,
+            port=self._port,
+            virtual_host=self._vhost,
+            credentials=pika.PlainCredentials(self._username, self._password),
+            heartbeat=self._heartbeat,
+            blocked_connection_timeout=self._blocked_connection_timeout,
+            connection_attempts=self._connection_attempts,
+            retry_delay=self._retry_delay,
+            socket_timeout=self._socket_timeout,
+        )
+        logger.info(f"Connecting to RabbitMQ at {self._host}:{self._port} vhost='{self._vhost}'")
+        self._connection = pika.BlockingConnection(params)
+        self._channel = self._connection.channel()
+        logger.info("Connection established and channel opened")
+
+    def close(self):
+        try:
+            if self._channel and self._channel.is_open:
+                self._channel.close()
+        except Exception as e:
+            logger.warning(f"Error closing channel: {e}")
+        try:
+            if self._connection and self._connection.is_open:
+                self._connection.close()
+        except Exception as e:
+            logger.warning(f"Error closing connection: {e}")
+
+    def _on_term_signal(self, signum, _frame):
+        # Do not abort mid-processing; just mark and finish
+        self._in_shutdown = True
+        logger.warning(f"Received signal {signum}; will exit after current message finishes.")
+
+    def _basic_get(self):
+        assert self._channel is not None
+        return self._channel.basic_get(self._queue, auto_ack=False)
+
+    def _ack(self, delivery_tag: int):
+        assert self._channel is not None
+        self._channel.basic_ack(delivery_tag)
+
+    def _reject_drop(self, delivery_tag: int):
+        # Mirror RMQConsumer failure behavior: reject with requeue=False
+        assert self._channel is not None
+        self._channel.basic_reject(delivery_tag, requeue=False)
+
+    def run_once(self) -> int:
+        """
+        Exit codes:
+          0 -> processed OK or queue empty
+          2 -> conversion/handler failed (rejected)
+          3 -> connection/setup error
+        """
+        try:
+            self.connect()
+        except Exception as e:
+            logger.error(f"Failed to connect to RabbitMQ: {e}")
+            return 3
+
+        try:
+            method, properties, body = self._basic_get()
+
+            if not method:
+                logger.info(f"No message available in queue '{self._queue}', exiting")
+                return 0
+
+            delivery_tag = method.delivery_tag
+            app_id = getattr(properties, "app_id", None)
+            headers = getattr(properties, "headers", None)
+
+            logger.info(f"Received message #{delivery_tag} from {app_id} meta: {headers}")
+            if self.log_body:
+                logger.debug(f"Message body: {body!r}")
+
+            if self.message_converter:
+                try:
+                    body, content_type = self.message_converter.convert(body)
+                    if properties is None:
+                        properties = pika.BasicProperties(content_type=content_type)
+                    else:
+                        properties.content_type = content_type
+                    logger.info("Message converted")
+                except Exception as error:
+                    logger.error(f"Message conversion failed: {error}\n{traceback.format_exc()}")
+                    self._reject_drop(delivery_tag)
+                    return 2
+
+            for handler in self.message_handlers:
+                try:
+                    logger.info(f"Handling message with handler: {handler.__class__.__name__}")
+                    body, properties = handler.handle(body, properties=properties, channel=self._channel)
+                except Exception as error:
+                    logger.error(f"Message handling failed: {error}\n{traceback.format_exc()}")
+                    logger.exception("Message handling failed, see traceback in document")
+                    self._reject_drop(delivery_tag)
+                    return 2
+
+            if self.reply_to:
+                logger.info(f"Publishing message to exchange/queue: {self.reply_to}")
+                self._channel.basic_publish(exchange="", routing_key=self.reply_to, body=body, properties=properties)
+
+            # Success
+            self._ack(delivery_tag)
+            logger.info(f"ACKed message #{delivery_tag}")
+
+            if self._in_shutdown:
+                logger.info("Shutdown requested; exiting cleanly after finishing message")
+            return 0
+
+        finally:
+            self.close()
 
 
 class RMQConsumer:
