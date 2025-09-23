@@ -2,14 +2,22 @@ import triplets
 from pika import BasicProperties
 import uuid
 from datetime import datetime
+import pandas as pd
 from io import BytesIO
 import config
+from pathlib import Path
 from loguru import logger
 from integrations.s3_storage import S3Minio
 from integrations.elastic import Elastic
+from common.rdf_converter import convert_cim_rdf_to_json, normalize_cim_payload
 from common.config_parser import parse_app_properties
 
-parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
+parse_app_properties(caller_globals=globals(),
+                     path=config.paths.object_storage.object_storage)
+parse_app_properties(caller_globals=globals(),
+                     path=str(Path(__file__).parent.joinpath("config.properties")),
+                     section="HANDLER",
+                     eval_types=True)
 
 
 class HandlerMetadataToObjectStorage:
@@ -35,6 +43,9 @@ class HandlerMetadataToObjectStorage:
             "rmq": {"headers": properties.headers}
         }
         metadata_object.update(metadata_header)
+
+        # Store profile keyword in message properties for further handlers
+        properties.headers["keyword"] = metadata_header.get("keyword", "UNDEFINED")
 
         # Upload payload to S3 storage
         ## Update content object name
@@ -62,6 +73,49 @@ class HandlerMetadataToObjectStorage:
         )
 
         # logger.info(f"Message sending to Elastic successful: {response}")
+
+        return message, properties
+
+
+class HandlerInputDataToElastic:
+
+    KEYWORD_MAP = {
+        "CO": {"root_class": ["OrdinaryContingency", "ExceptionalContingency", "OutOfRangeContingency"], "index": ELASTIC_CONTINGENCIES_INDEX},
+        "AE": {"root_class": ["AssessedElement"], "index": ELASTIC_ASSESSED_ELEMENTS_INDEX},
+        "RA": {"root_class": ["GridStateAlterationRemedialAction"], "index": ELASTIC_REMEDIAL_ACTIONS_INDEX},
+    }
+
+    def __init__(self):
+        self.elastic_service = Elastic()
+
+    def handle(self, message: bytes, properties: BasicProperties,  **kwargs):
+
+        # Get profile keyword
+        keyword = properties.headers.get("keyword", None)
+        if not keyword or keyword == 'UNDEFINED':
+            logger.error(f"RMQ message does not have profile 'keyword' in headers")
+            return message, properties
+
+        # Convert message from NC to JSON
+        data = convert_cim_rdf_to_json(rdfxml=message,
+                                       root_class=self.KEYWORD_MAP[keyword]["root_class"],
+                                       key_mode=CONVERTER_KEY_MODE)
+
+        # JSON normalize and transform to DataFrame
+        df = normalize_cim_payload(payload=data, root_only=True)
+
+        # Convert to dictionary
+        data_to_send = df.astype(object).where(pd.notna(df), None).to_dict("records")
+
+        # Send to Elastic
+        _index = self.KEYWORD_MAP[keyword]["index"]
+        logger.info(f"Sending data to index: {_index}")
+        response = self.elastic_service.send_to_elastic_bulk(
+            index=_index,
+            json_message_list=data_to_send,
+        )
+
+        logger.info(f"Message sending to Elastic successful: {response}")
 
         return message, properties
 
