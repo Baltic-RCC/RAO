@@ -16,7 +16,6 @@ def dataframe_deep_explode(df: pd.DataFrame, column_chain: List[str]):
     return df
 
 
-
 def package_for_pypowsybl(opdm_objects, return_zip: bool = False):
     """
     Method to transform OPDM objects into sufficient format binary buffer or zip package
