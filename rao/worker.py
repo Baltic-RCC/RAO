@@ -19,19 +19,22 @@ if getattr(config.initialize_logging, 'elastic_handler', None):
 
 logger.info(f"Starting 'optimizer' worker with assigned trace id: {worker_id}")
 
-# RabbitMQ single message consumer implementation aligned with KEDA usage
-consumer = rmq.SingleMessageConsumer(
-    queue=RMQ_QUEUE_IN,
-    message_handlers=[HandlerVirtualOperator()],
-)
-sys.exit(consumer.run())
-
-# RabbitMQ long-living consumer implementation
-# consumer = rmq.RMQConsumer(
-#     queue=RMQ_QUEUE_IN,
-#     message_handlers=[HandlerVirtualOperator()],
-# )
-# try:
-#     consumer.run()
-# except KeyboardInterrupt:
-#     consumer.stop()
+if CONSUMER_TYPE == "SINGLE_MESSAGE":
+    # RabbitMQ single message consumer implementation aligned with KEDA usage
+    consumer = rmq.SingleMessageConsumer(
+        queue=RMQ_QUEUE_IN,
+        message_handlers=[HandlerVirtualOperator()],
+    )
+    sys.exit(consumer.run())
+elif CONSUMER_TYPE == "LONG_LIVING":
+    # RabbitMQ long-living consumer implementation
+    consumer = rmq.RMQConsumer(
+        queue=RMQ_QUEUE_IN,
+        message_handlers=[HandlerVirtualOperator()],
+    )
+    try:
+        consumer.run()
+    except KeyboardInterrupt:
+        consumer.stop()
+else:
+    raise Exception("Unknown CONSUMER_TYPE, please check the config.properties file")

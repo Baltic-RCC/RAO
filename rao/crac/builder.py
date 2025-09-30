@@ -91,6 +91,15 @@ class CracBuilder:
 
     def update_limits_from_network(self,):
 
+        def _get_limit_fallback_to_patl(instance: object, primary: dict, fallback: dict):
+            value = primary.get(instance.networkElementId)
+            if value is None:
+                fallback_value = fallback.get(instance.networkElementId)
+                if fallback_value is not None:
+                    logger.warning(f"TATL limit is missing for {instance.name}, using PATL value instead")
+                    return fallback_value
+            return value
+
         if self.limits is None:
             self.get_limits()
 
@@ -109,11 +118,17 @@ class CracBuilder:
             patl_current_limits = patl_limits["CurrentLimit.value"].min().to_dict()
             tatl_current_limits = tatl_limits["CurrentLimit.value"].min().to_dict()
 
-        patl_power_limits = {}
-        tatl_power_limits = {}
+        patl_active_power_limits = {}
+        tatl_active_power_limits = {}
         if "ActivePowerLimit.value" in self.limits.columns:
-            patl_power_limits = patl_limits["ActivePowerLimit.value"].min().to_dict()
-            tatl_power_limits = tatl_limits["ActivePowerLimit.value"].min().to_dict()
+            patl_active_power_limits = patl_limits["ActivePowerLimit.value"].min().to_dict()
+            tatl_active_power_limits = tatl_limits["ActivePowerLimit.value"].min().to_dict()
+
+        patl_apparent_power_limits = {}
+        tatl_apparent_power_limits = {}
+        if "ActivePowerLimit.value" in self.limits.columns:
+            patl_apparent_power_limits = patl_limits["ApparentPowerLimit.value"].min().to_dict()
+            tatl_apparent_power_limits = tatl_limits["ApparentPowerLimit.value"].min().to_dict()
 
         for monitored_element in self._crac.flowCnecs:
 
@@ -129,33 +144,33 @@ class CracBuilder:
                 else:
                     monitored_element.nominalV = [operational_voltage]
                     logger.debug(f"Flow CNEC {monitored_element.name} [{monitored_element.instant}] nominal voltage updated: {operational_voltage}")
-            # Set limits for preventative state
-            current_limits = patl_current_limits
-            power_limits = patl_power_limits
+            else:
+                logger.warning(f"Flow CNEC {monitored_element.name} operational voltage not available, using nominal")
 
-            # Set limits for curative state
-            if monitored_element.instant == "curative":
-                current_limits = tatl_current_limits.copy()
-                power_limits = tatl_power_limits.copy()
+            # Select limits by instant of CNEC
+            if monitored_element.instant == "preventive":
+                current_limits = patl_current_limits
+                active_power_limits = patl_active_power_limits
+                apparent_power_limits = patl_apparent_power_limits
+            else:
+                current_limits = tatl_current_limits
+                active_power_limits = tatl_active_power_limits
+                apparent_power_limits = tatl_apparent_power_limits
 
-            # Fallback logic for missing curative state TATL limits
-            #TODO temporary fix, TATL must be accurately represented in the models
-            if power_limits.get(monitored_element.networkElementId) is None:
-                fallback_limit = patl_power_limits.get(monitored_element.networkElementId)
-                if fallback_limit is not None:
-                    power_limits[monitored_element.networkElementId] = fallback_limit
-                    logger.warning(f"TATL power limit is missing for {monitored_element.name}, using PATL value instead")
-
-            if current_limits.get(monitored_element.networkElementId) is None:
-                fallback_limit = patl_current_limits.get(monitored_element.networkElementId)
-                if fallback_limit is not None:
-                    current_limits[ monitored_element.networkElementId ] = fallback_limit
-                    logger.warning(f"TATL current limit is missing for {monitored_element.name}, using PATL value instead")
-
-            if limit := power_limits.get(monitored_element.networkElementId):
-                unit = "megawatt"
-            elif limit := current_limits.get(monitored_element.networkElementId):
+            # Get actual limits
+            if limit := _get_limit_fallback_to_patl(instance=monitored_element,
+                                                    primary=current_limits,
+                                                    fallback=patl_current_limits):
                 unit = "ampere"
+            elif limit := _get_limit_fallback_to_patl(instance=monitored_element,
+                                                      primary=active_power_limits,
+                                                      fallback=patl_active_power_limits):
+                unit = "megawatt"
+            elif limit := _get_limit_fallback_to_patl(instance=monitored_element,
+                                                      primary=apparent_power_limits,
+                                                      fallback=patl_apparent_power_limits):
+                limit = round(limit * 0.9, 1)  # TODO assumption that PF in 0.9
+                unit = "megawatt"
             else:
                 logger.warning(f"Limit not found for {monitored_element.name} with element id: {monitored_element.networkElementId}")
                 continue
@@ -254,6 +269,15 @@ class CracBuilder:
                 logger.debug(f"Added CNEC {ae['IdentifiedObject.name']} for curative state on contingency: {contingency.name}")
 
     def process_remedial_actions(self):
+        """
+        TopologyAction type grid alteration can only have property range with direction "none" or "upAndDown"
+        "none" - sets value only what defined under normalValue
+        "upAndDown" - allows RAO to connect or disconnect equipment not depending on what in normalValue or what
+        actual status of equipment in current case
+        """
+
+        def _get_opposite_terminal_connection_value(value: str):
+            return "open" if value == "close" else "close"
 
         # Grid state alteration remedial actions
         grid_state_alteration = self.data.key_tableview("GridStateAlteration.GridStateAlterationRemedialAction",
@@ -267,7 +291,16 @@ class CracBuilder:
 
         for mrid, data in remedial_actions.groupby("IdentifiedObject.mRID_GridStateAlterationRemedialAction"):
 
-            # Create network actions objects
+            # Get relevant property ranges for the remedial action
+            ranges = property_ranges[property_ranges['RangeConstraint.GridStateAlteration'].isin(data['IdentifiedObject.mRID_GridStateAlteration'])]
+            # Validate whether all alterations similar direction attribute of property ranges
+            directions = ranges['RangeConstraint.direction'].apply(lambda x: x.split(".")[-1])
+            if len(directions.unique()) > 1:
+                logger.warning(f"Remedial action contains alterations with different property range directions: {mrid}")
+                logger.warning(f"Not supported by CRAC builder, ignoring remedial action")
+                continue
+
+            # Create network elements property modification
             actions = []
             for action in data.to_dict("records"):
 
@@ -314,6 +347,7 @@ class CracBuilder:
             if not actions:
                 logger.warning(f"No actions available for GridStateAlterationRemedialAction: {mrid}")
                 continue
+
             network_action = models.NetworkAction(
                 id=data['IdentifiedObject.mRID_GridStateAlterationRemedialAction'].iloc[0],
                 name=data['IdentifiedObject.name_GridStateAlterationRemedialAction'].iloc[0],
@@ -328,6 +362,17 @@ class CracBuilder:
                 shuntCompensatorPositionActions=[i for i in actions if isinstance(i, models.ShuntCompensatorPositionAction)],
             )
             self._crac.networkActions.append(network_action)
+
+            # Check whether directions is "upAndDown", then multiple network actions have to be defined in CRAC
+            if directions.unique().item() == "upAndDown" and getattr(network_action, "terminalsConnectionActions", None):
+                logger.debug(f"Remedial action defined with 'upAndDown' direction, adding opposite terminal connection actions")
+                _opposite_terminal_actions = [x.model_copy(update={"actionType": _get_opposite_terminal_connection_value(x.actionType)}) for x in actions]
+                _updates = {
+                    "id": f"{data['IdentifiedObject.mRID_GridStateAlterationRemedialAction'].iloc[0]}-opposite-direction",
+                    "terminalsConnectionActions": _opposite_terminal_actions,
+                }
+                opposite_network_action = network_action.model_copy(update=_updates)
+                self._crac.networkActions.append(opposite_network_action)
 
     @performance_counter(units='seconds')
     def build_crac(self, contingency_ids: list | None = None):
