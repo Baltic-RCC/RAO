@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pika import BasicProperties
 from io import BytesIO
 import pandas as pd
+import numpy as np
 import json
 import pypowsybl
 import itertools
@@ -146,6 +147,19 @@ class HandlerVirtualOperator:
 
         # TODO - explode by optimized network actions
         # results = results.explode("action.terminalsConnectionActions")
+
+        # Calculate CNEC loading percentages
+        _min_thresholds = results['cnec.thresholds.min']
+        _max_thresholds = results['cnec.thresholds.max']
+        _unit = results['cnec.thresholds.unit']
+        for col in results.filter(regex=r'^cnecResults\.[^.]+\.[^.]+\.side1\.flow$').columns:
+            _unit_key = col.split(".")[2]  # -> "ampere" / "megawatt"
+            _loading_col_name = col.replace("flow", "Loading")
+            # choose + or - limit based on sign of the flow
+            _denominator = np.where(results[col].ge(0), _max_thresholds, _min_thresholds)
+            # compute only for matching unit and non-zero limit
+            _mask = (_unit == _unit_key) & (_denominator != 0)
+            results[_loading_col_name] = np.where(_mask, results[col] / _denominator, np.nan)
 
         return results
 
@@ -292,6 +306,14 @@ class HandlerVirtualOperator:
             # Check if there are any optimized remedial actions
             if not results['networkActionResults'] and not results['rangeActionResults']:
                 logger.warning(f"No possible actions proposed by optimizer")
+            else:
+                for optimized_action in results['networkActionResults']:
+                    logger.info(f"Optimized network action: {optimized_action}")
+                    _details = [x for x in self.crac['networkActions'] if x['id'] == optimized_action['networkActionId']]
+                    logger.info(f"Action details: {_details[0]}")
+                for optimized_action in results['rangeActionResults']:
+                    # TODO print out action details
+                    logger.info(f"Optimized range action: {optimized_action}")
 
             # Post-process optimizer results
             logger.info(f"Post-processing results")
