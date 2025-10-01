@@ -154,7 +154,7 @@ class HandlerVirtualOperator:
         _unit = results['cnec.thresholds.unit']
         for col in results.filter(regex=r'^cnecResults\.[^.]+\.[^.]+\.side1\.flow$').columns:
             _unit_key = col.split(".")[2]  # -> "ampere" / "megawatt"
-            _loading_col_name = col.replace("flow", "Loading")
+            _loading_col_name = col.replace("flow", "loading")
             # choose + or - limit based on sign of the flow
             _denominator = np.where(results[col].ge(0), _max_thresholds, _min_thresholds)
             # compute only for matching unit and non-zero limit
