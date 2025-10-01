@@ -4,7 +4,6 @@ import pika
 import config
 import traceback
 import signal
-import threading
 from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor
 from loguru import logger
@@ -157,19 +156,6 @@ class BlockingClient:
 
 
 class SingleMessageConsumer:
-    """
-    One-shot worker for KEDA ScaledJob:
-      - BlockingConnection + basic_get(one message)
-      - convert -> handle(s) -> optional reply_to publish
-      - ACK on success (after publish confirm), REJECT (requeue=False) on failure
-      - Best-effort close; never busy-wait
-    Exit codes:
-      0 -> processed OK or queue empty
-      2 -> conversion/handler failed (rejected)
-      3 -> connection/setup error (couldn’t even start)
-      4 -> lost connection while finishing (unknown message outcome; expect redelivery)
-    """
-
     def __init__(self,
                  host: str = RMQ_SERVER,
                  port: int = RMQ_PORT,
@@ -180,20 +166,15 @@ class SingleMessageConsumer:
                  reply_to: Optional[str] = None,
                  message_handlers: Optional[List[object]] = None,
                  message_converter: Optional[object] = None,
-                 heartbeat: int = 0,  # safer for long jobs
+                 heartbeat: int = 120,
                  socket_timeout: Optional[float] = None,
                  blocked_connection_timeout: float = 600.0,
                  connection_attempts: int = 5,
                  retry_delay: int = 3,
-                 log_body: bool = False,
-                 ):
-        self._host = host
-        self._port = int(port)
-        self._vhost = vhost
+                 log_body: bool = False):
+        self._host, self._port, self._vhost = host, int(port), vhost
         self._queue = queue
-        self._username = username
-        self._password = password
-
+        self._username, self._password = username, password
         self.reply_to = reply_to
         self.message_handlers = message_handlers or []
         self.message_converter = message_converter
@@ -208,60 +189,30 @@ class SingleMessageConsumer:
         self._connection: Optional[pika.BlockingConnection] = None
         self._channel: Optional[pika.adapters.blocking_connection.BlockingChannel] = None
         self._in_shutdown = False
-        self._hb_thread: Optional[threading.Thread] = None
+
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
         signal.signal(signal.SIGTERM, self._on_term_signal)
         signal.signal(signal.SIGINT, self._on_term_signal)
 
-    def _build_params(self) -> pika.ConnectionParameters:
+    def _params(self) -> pika.ConnectionParameters:
         return pika.ConnectionParameters(
             host=self._host,
             port=self._port,
             virtual_host=self._vhost,
             credentials=pika.PlainCredentials(self._username, self._password),
-            heartbeat=self._heartbeat,  # keep 0 for long one-shot jobs unless you enable the pinger
+            heartbeat=self._heartbeat,
             blocked_connection_timeout=self._blocked_connection_timeout,
             connection_attempts=self._connection_attempts,
             retry_delay=self._retry_delay,
             socket_timeout=self._socket_timeout,
-            tcp_options=pika.TCPOptions(
-                keepalive=True,
-                keepalive_idle=60,
-                keepalive_interval=30,
-                keepalive_count=3,
-            ),
             client_properties={"connection_name": "keda-single-shot"},
         )
 
-    def _start_heartbeat_pinger(self):
-        def _ping():
-            while not self._in_shutdown and self._connection and self._connection.is_open:
-                try:
-                    # Allow Pika to flush heartbeats/I/O without consuming
-                    self._connection.process_data_events(time_limit=0)
-                except Exception:
-                    break
-                # Ping often enough for heartbeat, but very light
-                time.sleep(max(1, self._heartbeat // 2))
-        self._hb_thread = threading.Thread(target=_ping, name="pika-heartbeat", daemon=True)
-        self._hb_thread.start()
-
     def connect(self):
-        params = self._build_params()
         logger.info(f"Connecting to RabbitMQ at {self._host}:{self._port} vhost='{self._vhost}'")
-        self._connection = pika.BlockingConnection(params)
+        self._connection = pika.BlockingConnection(self._params())
         self._channel = self._connection.channel()
-        # Enable publisher confirms up-front (safe even if we don't publish)
-        try:
-            self._channel.confirm_delivery()
-        except Exception:
-            # If confirms are unsupported, we just proceed without them
-            pass
-
-        # If you explicitly set heartbeat>0, keep Pika’s I/O loop alive during long work
-        if self._heartbeat and self._heartbeat > 0:
-            self._start_heartbeat_pinger()
-
         logger.info("Connection established and channel opened")
 
     def close(self):
@@ -275,38 +226,47 @@ class SingleMessageConsumer:
                 self._connection.close()
         except Exception as e:
             logger.warning(f"Error closing connection: {e}")
+        self._executor.shutdown(wait=False, cancel_futures=True)
 
     def _on_term_signal(self, signum, _frame):
-        # Do not abort mid-processing; just mark and finish
         self._in_shutdown = True
         logger.warning(f"Received signal {signum}; will exit after current message finishes.")
 
-    def _basic_get(self):
-        assert self._channel is not None
-        return self._channel.basic_get(self._queue, auto_ack=False)
+    # -------- worker function (no channel ops here) --------
+    def _process_messages(self, basic_deliver, properties, body):
+        ack = True
+        err = None
 
-    def _ack(self, delivery_tag: int) -> bool:
-        """Best-effort ack that won’t crash the worker if the socket died."""
-        assert self._channel is not None
-        try:
-            self._channel.basic_ack(delivery_tag)
-            return True
-        except Exception as e:
-            # Keep original success log elsewhere; just record the failure here
-            logger.error(f"Failed to ACK message #{delivery_tag}: {e}")
-            return False
+        # Convert if needed
+        if self.message_converter:
+            try:
+                body, content_type = self.message_converter.convert(body)
+                if properties is None:
+                    properties = pika.BasicProperties(content_type=content_type)
+                else:
+                    properties.content_type = content_type
+                logger.info("Message converted")
+            except Exception as error:
+                logger.error(f"Message conversion failed: {error}\n{traceback.format_exc()}")
+                ack = False
+                err = error
 
-    def _reject_drop(self, delivery_tag: int) -> bool:
-        """Best-effort reject (requeue=False) that tolerates EOF."""
-        assert self._channel is not None
-        try:
-            # Mirror RMQConsumer failure behavior: reject with requeue=False
-            self._channel.basic_reject(delivery_tag, requeue=False)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to REJECT message #{delivery_tag}: {e}")
-            return False
+        # Handlers
+        if ack and self.message_handlers:
+            for message_handler in self.message_handlers:
+                try:
+                    logger.info(f"Handling message with handler: {message_handler.__class__.__name__}")
+                    body, properties = message_handler.handle(body, properties=properties, channel=None)
+                except Exception as error:
+                    logger.error(f"Message handling failed: {error}\n{traceback.format_exc()}")
+                    logger.exception("Message handling failed, see traceback in document")
+                    ack = False
+                    err = error
+                    break
 
+        return ack, body, properties, err, basic_deliver.delivery_tag
+
+    # -------- single-message main --------
     def run(self) -> int:
         """
         Exit codes:
@@ -321,66 +281,54 @@ class SingleMessageConsumer:
             return 3
 
         try:
-            method, properties, body = self._basic_get()
-
+            method, properties, body = self._channel.basic_get(self._queue, auto_ack=False)
             if not method:
                 logger.warning(f"No message available in queue '{self._queue}', exiting")
                 return 0
 
             delivery_tag = method.delivery_tag
-            app_id = getattr(properties, "app_id", None)
-            headers = getattr(properties, "headers", None)
-
-            logger.info(f"Received message #{delivery_tag} from {app_id} meta: {headers}")
+            logger.info(f"Received message #{delivery_tag} from {getattr(properties,'app_id',None)} meta: {getattr(properties,'headers',None)}")
             if self.log_body:
                 logger.debug(f"Message body: {body!r}")
 
-            if self.message_converter:
-                try:
-                    body, content_type = self.message_converter.convert(body)
-                    if properties is None:
-                        properties = pika.BasicProperties(content_type=content_type)
-                    else:
-                        properties.content_type = content_type
-                    logger.info("Message converted")
-                except Exception as error:
-                    logger.error(f"Message conversion failed: {error}\n{traceback.format_exc()}")
-                    if self._reject_drop(delivery_tag):
-                        return 2
-                    # if reject failed (likely EOF), treat as connection/setup error so KEDA can retry
-                    return 3
+            future = self._executor.submit(self._process_messages, method, properties, body)
 
-            for handler in self.message_handlers:
+            # keep heartbeats flowing while waiting for worker completion
+            while not future.done():
                 try:
-                    logger.info(f"Handling message with handler: {handler.__class__.__name__}")
-                    body, properties = handler.handle(body, properties=properties, channel=self._channel)
-                except Exception as error:
-                    logger.error(f"Message handling failed: {error}\n{traceback.format_exc()}")
-                    logger.exception("Message handling failed, see traceback in document")
-                    if self._reject_drop(delivery_tag):
-                        return 2
+                    self._connection.process_data_events(time_limit=0)
+                except Exception:
+                    pass
+                time.sleep(0.25)
+
+            ack, out_body, out_props, err, dtag = future.result()
+
+            if not ack:
+                try:
+                    self._channel.basic_reject(dtag, requeue=False)
+                except Exception as e:
+                    logger.error(f"Failed to REJECT message #{dtag}: {e}")
                     return 3
+                return 2
 
             if self.reply_to:
                 logger.info(f"Publishing message to exchange/queue: {self.reply_to}")
                 try:
-                    self._channel.basic_publish(exchange=self.reply_to, routing_key="", body=body, properties=properties)
-                    # If publisher confirms are enabled, basic_publish may return True/False (pika dependent).
-                    # If False (or explicit None while confirms are on), we’ll treat as success unless an exception was raised.
-                    # Any exception indicates the connection is likely dead.
+                    self._channel.basic_publish(
+                        exchange=self.reply_to, routing_key="", body=out_body, properties=out_props
+                    )
                 except Exception as e:
                     logger.error(f"Publish failed: {e}")
-                    # Leave unacked so it can be redelivered
-                    return 3
+                    return 3  # leave unacked for redelivery
 
-            # Success path: ACK (may raise if connection silently died)
-            if self._ack(delivery_tag):
-                logger.info(f"ACKed message #{delivery_tag}")
+            try:
+                self._channel.basic_ack(dtag)
+                logger.info(f"ACKed message #{dtag}")
                 if self._in_shutdown:
                     logger.info("Shutdown requested; exiting cleanly after finishing message")
                 return 0
-            else:
-                # Could not ack (EOF etc.), signal infra to retry
+            except Exception as e:
+                logger.error(f"Failed to ACK message #{dtag}: {e}")
                 return 3
 
         finally:
