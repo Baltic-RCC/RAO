@@ -140,7 +140,7 @@ class CracBuilder:
                 if "_AT" in monitored_element.name:
                     max_op_voltage = max_voltage.get(monitored_element.networkElementId)
                     monitored_element.nominalV = [max_op_voltage]
-                    logger.debug(f"Flow CNEC {monitored_element.name} [{monitored_element.instant}] max operational voltage selected: {max_voltage}")
+                    logger.debug(f"Flow CNEC {monitored_element.name} [{monitored_element.instant}] max operational voltage selected: {max_op_voltage}")
                 else:
                     monitored_element.nominalV = [operational_voltage]
                     logger.debug(f"Flow CNEC {monitored_element.name} [{monitored_element.instant}] nominal voltage updated: {operational_voltage}")
