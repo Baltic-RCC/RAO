@@ -37,15 +37,15 @@ class CracBuilder:
     def perform_cnec_consistency_check(self):
 
         # Find the flowCnec thresholds
-        flow_cnecs = list(getattr(self._crac, "flowCnecs", []))
-        kept = []
+        flow_cnecs = list(getattr(self._crac, "flowCnecs", [ ]))
+        kept = [ ]
 
         for cnec in flow_cnecs:
             cnec_name = getattr(cnec, "name", None)
 
-            thresholds = getattr(cnec, "thresholds", []) or []
+            thresholds = getattr(cnec, "thresholds", [ ]) or [ ]
             if not isinstance(thresholds, list):
-                thresholds = [thresholds]
+                thresholds = [ thresholds ]
 
             # Flag FlowCNEC as removed if limits min=0, max=0
             removed = any((getattr(th, "min", None) == 0) and (getattr(th, "max", None) == 0) for th in thresholds)
@@ -324,6 +324,9 @@ class CracBuilder:
                 logger.warning(f"Not supported by CRAC builder, ignoring remedial action")
                 continue
 
+            # Set base activation cost for all remedial actions
+            data['virtual_cost'] = 0
+
             # Create network elements property modification
             actions = []
             for action in data.to_dict("records"):
@@ -358,6 +361,17 @@ class CracBuilder:
                     logger.warning(f"Grid state alteration type is not supported: {action_type}")
                     continue
 
+                # Set non-reserve topology actions virtual cost higher than reserve topology actions
+                if action_type == 'TopologyAction' and directions.iloc[0] == 'none':
+                    data['virtual_cost'] = 50
+
+                    logger.debug(f"Assigning virtual cost of {data['virtual_cost'].iloc[0]} to non-reserve topology action {data['IdentifiedObject.name_GridStateAlterationRemedialAction'].iloc[0]}")
+                # TODO [TEMPORARY] remove extra RA checking for direction kind == up once all RA directions are semantically aligned
+                elif action_type == 'TopologyAction' and directions.iloc[0] == 'up':
+                    data['virtual_cost'] = 50
+
+                    logger.debug(f"Assigning virtual cost of {data['virtual_cost'].iloc[0]} to non-reserve topology action {data['IdentifiedObject.name_GridStateAlterationRemedialAction'].iloc[0]} with direction {directions.iloc[0]}" )
+
                 # TODO [TEMPORARY] - perform consistency check of action (not optimal doing one by one)
                 if element_id not in self.network.ID.values:
                     logger.warning(f"Alteration equipment of remedial action does not exist in network model: {action['IdentifiedObject.name_GridStateAlteration']}")
@@ -376,6 +390,7 @@ class CracBuilder:
                 id=data['IdentifiedObject.mRID_GridStateAlterationRemedialAction'].iloc[0],
                 name=data['IdentifiedObject.name_GridStateAlterationRemedialAction'].iloc[0],
                 operator=data['RemedialAction.RemedialActionSystemOperator'].iloc[0],
+                activationCost=data['virtual_cost'].iloc[0],
                 onInstantUsageRules=[
                     {
                         "usageMethod": "available",
