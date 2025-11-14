@@ -166,7 +166,7 @@ class SingleMessageConsumer:
                  reply_to: Optional[str] = None,
                  message_handlers: Optional[List[object]] = None,
                  message_converter: Optional[object] = None,
-                 heartbeat: int = 120,
+                 heartbeat: int = int(RMQ_HEARTBEAT),
                  socket_timeout: Optional[float] = None,
                  blocked_connection_timeout: float = 600.0,
                  connection_attempts: int = 5,
@@ -353,6 +353,7 @@ class RMQConsumer:
                  port: int = int(RMQ_PORT),
                  vhost: str = RMQ_VHOST,
                  queue: str | None = None,
+                 heartbeat: str | int = int(RMQ_HEARTBEAT),
                  reply_to: str | None = None,
                  username: str = RMQ_USERNAME,
                  password: str = RMQ_PASSWORD,
@@ -383,6 +384,7 @@ class RMQConsumer:
         self._port = port
         self._vhost = vhost
         self._queue = queue
+        self._heartbeat = heartbeat
         self._username = username
         self._executor = ThreadPoolExecutor()
         self._executor_stopped = False
@@ -391,6 +393,7 @@ class RMQConsumer:
                                                                 port=self._port,
                                                                 virtual_host=self._vhost,
                                                                 credentials=pika.PlainCredentials(username, password),
+                                                                heartbeat=self._heartbeat or None,
                                                                 )
 
     def connect(self):
@@ -681,6 +684,7 @@ class ReconnectingConsumer:
                  port: int = int(RMQ_PORT),
                  vhost: str = RMQ_VHOST,
                  queue: str | None = None,
+                 heartbeat: str | int = int(RMQ_HEARTBEAT),
                  reply_to: str | None = None,
                  username: str = RMQ_USERNAME,
                  password: str = RMQ_PASSWORD,
@@ -691,6 +695,7 @@ class ReconnectingConsumer:
         self._port = port
         self._vhost = vhost
         self._queue = queue
+        self._heartbeat = heartbeat
         self._reply_to = reply_to
         self._username = username
         self.__password = password
@@ -700,6 +705,7 @@ class ReconnectingConsumer:
                                      port=self._port,
                                      vhost=self._vhost,
                                      queue=self._queue,
+                                     heartbeat=self._heartbeat,
                                      reply_to=self._reply_to,
                                      username=self._username,
                                      password=self.__password,
@@ -738,14 +744,8 @@ class ReconnectingConsumer:
 
 if __name__ == '__main__':
     # Testing RMQ API
-    import sys
-
-    logging.basicConfig(stream=sys.stdout,
-                        format="%(levelname) -10s %(asctime) -10s %(name) -35s %(funcName) -30s %(lineno) -5d: %(message)s",
-                        level=logging.INFO)
-
     host = 'access_url'
-    port = 5670
+    port = 5672
     vhost = r'/'
     queue = 'queue-name'
     username = None
@@ -762,7 +762,7 @@ if __name__ == '__main__':
                            queue=queue,
                            username=username,
                            password=password,
-                           message_handler=None)
+                           message_handlers=None)
     try:
         consumer.run()
     except KeyboardInterrupt:
