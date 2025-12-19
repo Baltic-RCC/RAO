@@ -126,10 +126,10 @@ class Crac(BaseModel):
             if "AT" in cnec.name and "10X1001A1001A39W" in cnec.operator:
                 logger.warning(f"3W transformer CNEC excluded: {cnec.name} [{cnec.instant}]")
                 continue
-            # TODO - relevant until pypowsybl 1.11.2
-            elif "Tie-line" in cnec.description:
-                logger.warning(f"Dangling line CNEC excluded: {cnec.name} [{cnec.instant}]")
-                continue
+            # # TODO - relevant until pypowsybl 1.11.2
+            # elif "Tie-line" in cnec.description:
+            #     logger.warning(f"Dangling line CNEC excluded: {cnec.name} [{cnec.instant}]")
+            #     continue
             else:
                 result.append(cnec)
 
