@@ -56,6 +56,12 @@ class HandlerMetadataToObjectStorage:
             _publisher = _publisher.split("/")[-1]
         _start_date = metadata_object.get("startDate", "UNDEFINED")
         _end_date = metadata_object.get("endDate", "UNDEFINED")
+        ## Check for empty headers from RMQ message headers and remove them
+        headers_to_check = metadata_object["rmq"]["headers"]
+        for key in list(headers_to_check.keys()):
+            if headers_to_check[key] == "":
+                del headers_to_check[key]
+
         content.name = f"{S3_BUCKET_OUT_PREFIX}/{_keyword}_{_version}_{_publisher}_{_start_date}_{_end_date}.xml"
         self.s3_service.upload_object(
             file_path_or_file_object=content,
@@ -128,8 +134,8 @@ if __name__ == '__main__':
         "businessType": "CSA-INPUT",
         "messageID": f"{uuid.uuid4()}",
         "sendTimestamp": datetime.utcnow().isoformat(),
-        "sender": "TSOX",
-        "senderApplication": "APPX",
+        "sender": "",
+        "senderApplication": "",
         "service": "INPUT-DATA",
     }
     properties = BasicProperties(
@@ -140,7 +146,7 @@ if __name__ == '__main__':
         timestamp=1747208205,
         headers=headers,
     )
-    with open(r"C:\Users\martynas.karobcikas\Downloads\rcc-test-upload.xml", "rb") as file:
+    with open(r"C:\Users\lukas.navickas\Downloads\1222_23_RA_TEST_FOR_MINIO_IGNORE.xml", "rb") as file:
         file_bytes = file.read()
 
     # Create instance
