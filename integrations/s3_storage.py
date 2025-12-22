@@ -115,6 +115,9 @@ class S3Minio:
         else:
             length = file_object.getbuffer().nbytes
 
+        # Handle metadata - remove empty values as it caueses S3 error at upload
+        metadata = {k: v for k, v in metadata.items() if v}
+                          
         # Handle tags if provided
         if tags:
             tags = self.dict_to_tags(tags)
