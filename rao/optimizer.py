@@ -76,9 +76,10 @@ class Optimizer:
             self.network.remove_variant(var)
             logger.debug(f"Removed network variant: {var}")
 
-    def solve_loadflow(self):
+    def solve_loadflow(self, elastic_server: str = None, settings_keyword: str = "BA_DEFAULT"):
+        settings_manager = LoadflowSettingsManager(elastic_server=elastic_server, settings_keyword=settings_keyword)
         result = pypowsybl.loadflow.run_ac(network=self.network,
-                                           parameters=LoadflowSettingsManager().build_pypowsybl_parameters())
+                                           parameters=settings_manager.build_pypowsybl_parameters())
         logger.info(f"Loadflow status: {result[0].status_text}")
 
         return result

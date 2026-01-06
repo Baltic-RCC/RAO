@@ -41,9 +41,6 @@ class HandlerVirtualOperator:
         except Exception as e:
             logger.error(f"Failed to initialize ObjectStorage service: {e}")
 
-        # Loading configuration
-        self.lf_settings_manager = LoadflowSettingsManager()
-
         # Metadata
         self.scenario_timestamp = None
         self.network_model_meta = None
@@ -225,16 +222,30 @@ class HandlerVirtualOperator:
             logger.error(f"RMQ message does not have content reference in headers")
             return message, properties
         network_object = self.get_network_model(content_reference=content_reference)
+
+        # Determine used loadflow settings during model merge
+        try:
+            _loadflow_settings_key = self.network_model_meta["loadflow_settings"]
+            logger.info(f"Loadflow settings defined by received merged model: {_loadflow_settings_key}")
+        except KeyError:
+            logger.warning(f"Loadflow settings not defined by received merged model, using default: BA_DEFAULT")
+            _loadflow_settings_key = "BA_DEFAULT"
+
+        lf_settings_manager = LoadflowSettingsManager(
+            elastic_server=self.object_storage.elastic_service.server,
+            settings_keyword=_loadflow_settings_key,
+        )
+
         logger.info(f"Loading network model to pypowsybl")
         self.network = pypowsybl.network.load_from_binary_buffer(
             buffer=network_object,
-            parameters=self.lf_settings_manager.config['CGMES_IMPORT_PARAMETERS'])
+            parameters=lf_settings_manager.config['CGMES_IMPORT_PARAMETERS'])
 
         # Solve initial loadflow on retrieved model
         logger.info(f"Solve initial loadflow analysis")
         lf_result = pypowsybl.loadflow.run_ac(
             network=self.network,
-            parameters=self.lf_settings_manager.build_pypowsybl_parameters())
+            parameters=lf_settings_manager.build_pypowsybl_parameters())
         logger.info(f"Loadflow status: {lf_result[0]}")
         if lf_result[0].status.value:
             logger.error(f"Initial load flow computation failed, exiting message handling")
@@ -251,10 +262,6 @@ class HandlerVirtualOperator:
 
         # Get default optimization parameters
         optimizer_settings = RaoSettingsManager()
-        # Modify parameters if time horizon is ID
-        if properties.headers.get('time-horizon') == 'ID':
-            optimizer_settings.set(
-                path_or_dict={"extensions.open-rao-search-tree-parameters.topological-actions-optimization.max-curative-search-tree-depth": 1})
 
         # Create CRAC service
         logger.info(f"Loading network to triplets for CRAC service")

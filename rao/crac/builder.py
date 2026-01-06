@@ -109,8 +109,8 @@ class CracBuilder:
         tatl_limits = self.limits[self.limits["OperationalLimitType.limitType"].str.endswith(".tatl")].groupby("ID_Equipment")
 
         # Generate mean and max voltages for equipment
-        voltages = patl_limits["SvVoltage.v"].mean().round(1).to_dict()
-        max_voltage = patl_limits["SvVoltage.v"].max().round(1).to_dict()
+        # voltages = patl_limits["SvVoltage.v"].mean().round(1).to_dict()
+        # max_voltage = patl_limits["SvVoltage.v"].max().round(1).to_dict()
 
         patl_current_limits = {}
         tatl_current_limits = {}
@@ -126,7 +126,7 @@ class CracBuilder:
 
         patl_apparent_power_limits = {}
         tatl_apparent_power_limits = {}
-        if "ActivePowerLimit.value" in self.limits.columns:
+        if "ApparentPowerLimit.value" in self.limits.columns:
             patl_apparent_power_limits = patl_limits["ApparentPowerLimit.value"].min().to_dict()
             tatl_apparent_power_limits = tatl_limits["ApparentPowerLimit.value"].min().to_dict()
 
@@ -135,17 +135,17 @@ class CracBuilder:
             # TODO figure out optimization that same CNEC on preventive and curative instance would be updated
 
             # Set nominal voltage to operational voltages, taken from SV
-            if operational_voltage := voltages.get(monitored_element.networkElementId):
-                # TODO add both sides of the equipment when building CRAC nominal voltages
-                if "_AT" in monitored_element.name:
-                    max_op_voltage = max_voltage.get(monitored_element.networkElementId)
-                    monitored_element.nominalV = [max_op_voltage]
-                    logger.debug(f"Flow CNEC {monitored_element.name} [{monitored_element.instant}] max operational voltage selected: {max_op_voltage}")
-                else:
-                    monitored_element.nominalV = [operational_voltage]
-                    logger.debug(f"Flow CNEC {monitored_element.name} [{monitored_element.instant}] nominal voltage updated: {operational_voltage}")
-            else:
-                logger.warning(f"Flow CNEC {monitored_element.name} operational voltage not available, using nominal")
+            # if operational_voltage := voltages.get(monitored_element.networkElementId):
+            #     # TODO add both sides of the equipment when building CRAC nominal voltages
+            #     if "_AT" in monitored_element.name:
+            #         max_op_voltage = max_voltage.get(monitored_element.networkElementId)
+            #         monitored_element.nominalV = [max_op_voltage]
+            #         logger.debug(f"Flow CNEC {monitored_element.name} [{monitored_element.instant}] max operational voltage selected: {max_op_voltage}")
+            #     else:
+            #         monitored_element.nominalV = [operational_voltage]
+            #         logger.debug(f"Flow CNEC {monitored_element.name} [{monitored_element.instant}] nominal voltage updated: {operational_voltage}")
+            # else:
+            #     logger.warning(f"Flow CNEC {monitored_element.name} operational voltage not available, using nominal")
 
             # Select limits by instant of CNEC
             if monitored_element.instant == "preventive":
@@ -169,8 +169,7 @@ class CracBuilder:
             elif limit := _get_limit_fallback_to_patl(instance=monitored_element,
                                                       primary=apparent_power_limits,
                                                       fallback=patl_apparent_power_limits):
-                limit = round(limit * 0.9, 1)  # TODO assumption that PF in 0.9
-                unit = "megawatt"
+                unit = "apparent"
             else:
                 logger.warning(f"Limit not found for {monitored_element.name} with element id: {monitored_element.networkElementId}")
                 continue

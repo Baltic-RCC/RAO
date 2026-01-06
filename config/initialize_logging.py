@@ -138,3 +138,9 @@ if ELASTIC_LOGS_HANDLER:
 if ENABLE_POWSYBL_LOGS:
     logging.getLogger("powsybl").setLevel(LOG_LEVEL)
     logger.info(f"Powsybl logs enabled with level: {LOG_LEVEL}")
+
+# Exclude logs from ingration modules
+modules_to_exclude = EXCLUDE_LOGGERS.split(",") if EXCLUDE_LOGGERS else []
+if modules_to_exclude:
+    for m in modules_to_exclude:
+        logging.getLogger(m).propagate = False

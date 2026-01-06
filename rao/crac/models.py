@@ -15,7 +15,7 @@ class Contingency(BaseModel):
 
 
 class Threshold(BaseModel):
-    unit: Literal['megawatt', 'ampere', 'percent_imax', 'kilovolt'] = 'ampere'  # Default unit is 'ampere', can be adjusted if needed
+    unit: Literal['megawatt', 'ampere', 'percent_imax', 'kilovolt' 'apparent'] = 'ampere'  # Default unit is 'ampere', can be adjusted if needed
     min: float = 0
     max: float = 0
     side: int = 1  # Default side is 1, can be adjusted if needed
@@ -31,7 +31,7 @@ class Cnec(BaseModel):
     instant: Literal["preventive", "outage", "curative"] = "preventive"
     optimized: bool = True
     monitored: bool = False
-    nominalV: List[float] = [330.0]  # Default nominal voltage, can be adjusted if needed
+    nominalV: Optional[List[float]] = None  # Default nominal voltage, can be adjusted if needed
     contingencyId: Optional[str] = None
 
     @field_serializer("networkElementId", when_used='unless-none')
@@ -120,16 +120,15 @@ class Crac(BaseModel):
     def exclude_3w_transformer_from_flow_cnecs(self, values: List[FlowCnec]) -> List[FlowCnec]:
         # TODO TEMPORARY FILTER - remove after September release
         logger.warning(f"[TEMPORARY] Excluding 3W transformers from serialized CNECs for operator: ELERING")
-        logger.warning(f"[TEMPORARY] Excluding paired dangling lines from serialized CNECs")
+        logger.warning(f"[TEMPORARY] Excluding transformers from serialized CNECs for operator: PSE")
         result = []
         for cnec in values:
             if "AT" in cnec.name and "10X1001A1001A39W" in cnec.operator:
                 logger.warning(f"3W transformer CNEC excluded: {cnec.name} [{cnec.instant}]")
                 continue
-            # # TODO - relevant until pypowsybl 1.11.2
-            # elif "Tie-line" in cnec.description:
-            #     logger.warning(f"Dangling line CNEC excluded: {cnec.name} [{cnec.instant}]")
-            #     continue
+            elif "10XPL-TSO------P" in cnec.operator and cnec.thresholds[0].unit == "apparent":
+                logger.warning(f"Poland area CNEC excluded due to unsupported apparent power limits: {cnec.name} [{cnec.instant}]")
+                continue
             else:
                 result.append(cnec)
 

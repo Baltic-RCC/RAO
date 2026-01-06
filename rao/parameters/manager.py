@@ -3,8 +3,10 @@ import json
 from io import BytesIO
 from pathlib import Path
 from copy import deepcopy
+from typing import Optional
 import pypowsybl
 from enum import Enum as _PyEnum
+from elasticsearch import Elasticsearch
 from rao.parameters.loadflow import CGMES_IMPORT_PARAMETERS, LF_PROVIDER, LF_PARAMETERS
 from loguru import logger
 
@@ -17,7 +19,7 @@ except Exception:
 class LoadflowSettingsManager:
     """Class-based settings manager for pypowsybl load flow, similar to RaoSettingsManager.
 
-    - Defaults are imported from loadflow.py.
+    - Defaults are queried from Elasticsearch and fallback to loadflow.py file.
     - Optional override file path is read from env:
         * LOADFLOW_CONFIG_OVERRIDE_PATH
       The file may be JSON or YAML.
@@ -36,25 +38,55 @@ class LoadflowSettingsManager:
     _KNOWN_PARAM_FIELDS = list(pypowsybl.loadflow.Parameters().__dict__.keys())
     _KNOWN_PARAM_FIELDS = [f for f in _KNOWN_PARAM_FIELDS if f != "provider_parameters"]
 
-    def __init__(self, override_path: str | None = None):
+    def __init__(self,
+                 elastic_server: Optional[str] = None,
+                 elastic_username: Optional[str] = None,
+                 elastic_password: Optional[str] = None,
+                 elastic_index: str = 'config-lf-parameters',
+                 settings_keyword: str = 'BA_DEFAULT',
+                 override_path: Optional[str] = None):
+
+        self.elastic_server = elastic_server
+        self.elastic_username = elastic_username
+        self.elastic_password = elastic_password
+        self.elastic_index = elastic_index
+        self.settings_keyword = settings_keyword
+
         # Decide override path from arg or env
         env_path = os.environ.get('LOADFLOW_CONFIG_OVERRIDE_PATH')
         self.override_path = Path(override_path or env_path) if (override_path or env_path) else None
         if self.override_path:
             logger.info(f"Loadflow settings override path: {self.override_path}")
-        else:
-            logger.info("Using default loadflow settings")
 
-        # Build defaults snapshot (dict-based), then merge overrides if any
-        base = {
-            'CGMES_IMPORT_PARAMETERS': deepcopy(CGMES_IMPORT_PARAMETERS),
-            'LF_PROVIDER': deepcopy(LF_PROVIDER),
-            'LF_PARAMETERS': self._extract_params_dict(LF_PARAMETERS),
-        }
+        # Firstly try to get loadflow parameters from Elastic as primary source, otherwise - fallback to repository
+        try:
+            base = self._get_defaults_from_elastic()
+            # overwrite CGMES_IMPORT_PARAMETERS from local repository
+            base['CGMES_IMPORT_PARAMETERS'] = deepcopy(CGMES_IMPORT_PARAMETERS)
+        except Exception as err:
+            logger.warning(f"Loadflow settings retrieving failed from Elastic: {err}")
+            logger.warning(f"Using default settings from repository")
+            base = {
+                'CGMES_IMPORT_PARAMETERS': deepcopy(CGMES_IMPORT_PARAMETERS),
+                'LF_PROVIDER': deepcopy(LF_PROVIDER),
+                'LF_PARAMETERS': self._extract_params_dict(LF_PARAMETERS),
+            }
+
+        # Handle overrides if defined
         overrides = self._load_override_file(self.override_path) if self.override_path else {}
         self.config = self._deep_merge(base, overrides)
 
     # ----------------- I/O -----------------
+    def _get_defaults_from_elastic(self) -> dict:
+        if not self.elastic_server:
+            raise Exception("Elasticsearch server not defined")
+        client = Elasticsearch(self.elastic_server)
+        logger.info(f"Retrieving base loadflow settings fromm Elasticsearch with key: {self.settings_keyword}")
+        response = client.get(index=self.elastic_index, id=self.settings_keyword)
+
+        return response.raw["_source"]
+
+    @staticmethod
     def _load_override_file(self, path: Path | None) -> dict:
         if not path:
             return {}
