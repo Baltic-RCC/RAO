@@ -1,11 +1,19 @@
 name: Build and publish snapshot
 
+permissions:
+  contents: read
+
 on:
   push:
     tags:
       - "v*"
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag for the release (e.g., v1.0.0)'
+        required: true
 
 jobs:
   build-image:
@@ -17,8 +25,26 @@ jobs:
         run: |
           echo "INPUT_RETRIEVER_PROJECT=$(basename "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')-input-retriever" >> $GITHUB_ENV
           echo "RAO_PROJECT=$(basename "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')-optimizer" >> $GITHUB_ENV
-          echo "IMAGE_TAG=$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
+          # echo "IMAGE_TAG=$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
           echo "LATEST_TAG=latest" >> $GITHUB_ENV
+
+      - name: Compute IMAGE_TAG
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            # manual run: use the provided version
+            TAG="${{ inputs.version }}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            # tag push: use the tag name
+            TAG="${GITHUB_REF_NAME}"
+          else
+            # branch push: snap-<sha> (change to "${GITHUB_REF_NAME}" if you prefer)
+            TAG="snap-${GITHUB_SHA::7}"
+          fi
+
+          echo "IMAGE_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Computed IMAGE_TAG=$TAG"
 
       - uses: docker/login-action@v3
         with:
