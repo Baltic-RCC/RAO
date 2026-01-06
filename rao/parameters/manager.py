@@ -87,7 +87,7 @@ class LoadflowSettingsManager:
         return response.raw["_source"]
 
     @staticmethod
-    def _load_override_file(self, path: Path | None) -> dict:
+    def _load_override_file(path: Path | None) -> dict:
         if not path:
             return {}
         if not path.exists():
