@@ -25,7 +25,7 @@ jobs:
         run: |
           echo "INPUT_RETRIEVER_PROJECT=$(basename "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')-input-retriever" >> $GITHUB_ENV
           echo "RAO_PROJECT=$(basename "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')-optimizer" >> $GITHUB_ENV
-          # echo "IMAGE_TAG=$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
+          echo "DATE_TAG=$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
           echo "LATEST_TAG=latest" >> $GITHUB_ENV
 
       - name: Compute IMAGE_TAG
@@ -40,7 +40,7 @@ jobs:
             TAG="${GITHUB_REF_NAME}"
           else
             # branch push: snap-<sha> (change to "${GITHUB_REF_NAME}" if you prefer)
-            TAG="snap-${GITHUB_SHA::7}"
+            TAG="snap-${{ env.DATE_TAG }}"
           fi
 
           echo "IMAGE_TAG=$TAG" >> "$GITHUB_ENV"
