@@ -15,7 +15,7 @@ class Contingency(BaseModel):
 
 
 class Threshold(BaseModel):
-    unit: Literal['megawatt', 'ampere', 'percent_imax', 'kilovolt' 'apparent'] = 'ampere'  # Default unit is 'ampere', can be adjusted if needed
+    unit: Literal['megawatt', 'ampere', 'percent_imax', 'kilovolt', 'apparent'] = 'ampere'  # Default unit is 'ampere', can be adjusted if needed
     min: float = 0
     max: float = 0
     side: int = 1  # Default side is 1, can be adjusted if needed
