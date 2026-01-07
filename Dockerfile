@@ -1,5 +1,5 @@
 # Define base container image (platform has to be defined if using with ARM64 architecture)
-FROM python:3.11-slim as rao-base
+FROM python:3.11-slim AS rao-base
 #FROM --platform=linux/amd64 python:3.11-slim as rao-base
 
 # Install tools to set up python environment
@@ -10,6 +10,7 @@ RUN pip install --upgrade setuptools pip uv
 WORKDIR /app
 
 # Sync python modules as dependencies
+COPY pyproject.toml .
 COPY uv.lock .
 RUN uv export -o pylock.toml
 RUN uv pip sync pylock.toml --system  && uv cache clean
