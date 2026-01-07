@@ -4,6 +4,8 @@
 .github
 **/Dockerfile
 README.md
-LICENSE
+.gitmodules
+.python-version
+DEPENDENCY_LICENSES.md
 .gitlab-ci.yml
 .gitignore
