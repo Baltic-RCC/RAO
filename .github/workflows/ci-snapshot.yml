@@ -16,7 +16,7 @@ on:
         required: true
 
 jobs:
-  build-image:
+  build-workers:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
