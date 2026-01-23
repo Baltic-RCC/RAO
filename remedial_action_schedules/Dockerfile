@@ -11,6 +11,10 @@ COPY common/ ./common/
 COPY integrations/ ./integrations/
 COPY remedial_action_schedules/ ./remedial_action_schedules/
 
+# Change ownership to non-root user
+RUN chown -R appuser:appuser /app
+USER appuser
+
 # Start process
 ENV PYTHONPATH="${PYTHONPATH}:/app"
 ENTRYPOINT ["python"]

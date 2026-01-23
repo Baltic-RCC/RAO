@@ -2,6 +2,11 @@
 FROM python:3.11-slim AS rao-base
 #FROM --platform=linux/amd64 python:3.11-slim as rao-base
 
+# Set non root user
+ARG GID=1000
+ARG UID=1000
+RUN groupadd -g ${GID} appuser && useradd --create-home --no-log-init -u ${UID} -g ${GID} appuser
+
 # Install tools to set up python environment
 RUN apt-get update && apt-get install -y --no-install-recommends procps && rm -rf /var/lib/apt/lists/*
 RUN pip install --upgrade setuptools pip uv
