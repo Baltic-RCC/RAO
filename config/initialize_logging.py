@@ -39,12 +39,12 @@ class InterceptHandler(logging.Handler):
 
 class ElasticLogHandler:
 
-    def __init__(self, server: str, index: str, logs_rollover: bool = False, extra: dict | None = None):
+    def __init__(self, server: str, api_key: str, index: str, logs_rollover: bool = False, extra: dict | None = None):
         self.server = server
         self.index = index
         self.logs_rollover = logs_rollover
         self.extra = extra if extra else {}
-        self.client = Elasticsearch(self.server)
+        self.client = Elasticsearch(self.server, api_key=api_key)
 
         self._connected = True
         self._last_retry = 0
@@ -126,7 +126,7 @@ if ELASTIC_LOGS_HANDLER:
         es_logger = logging.getLogger(logger_name)
         es_logger.propagate = False
         es_logger.setLevel("WARNING")
-    elastic_handler = ElasticLogHandler(server=ELK_SERVER, index=ELASTIC_LOGS_INDEX)
+    elastic_handler = ElasticLogHandler(server=ELK_SERVER, api_key=ELK_TOKEN, index=ELASTIC_LOGS_INDEX)
     logger.add(sink=elastic_handler.write,
                level=LOG_LEVEL,
                serialize=True,

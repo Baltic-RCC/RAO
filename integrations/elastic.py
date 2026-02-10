@@ -19,16 +19,17 @@ parse_app_properties(caller_globals=globals(), path=config.paths.integrations.el
 
 class Elastic:
 
-    def __init__(self, server: str = ELK_SERVER, debug: bool = False):
+    def __init__(self, server: str = ELK_SERVER, api_key: str = ELK_TOKEN, debug: bool = False):
         self.server = server
         self.debug = debug
-        self.client = Elasticsearch(self.server)
+        self.client = Elasticsearch(self.server, api_key=api_key)
 
     @staticmethod
     def send_to_elastic(index: str,
                         json_message: dict,
                         id: str = None,
                         server: str = ELK_SERVER,
+                        api_key: str = ELK_TOKEN,
                         iso_timestamp: str = None,
                         debug: bool = False):
         """
@@ -62,7 +63,8 @@ class Elastic:
         if json_message.get('args', None):  # TODO revise if this is proper solution
             json_message.pop('args')
         json_data = json.dumps(json_message, default=str, ensure_ascii=True, skipkeys=True)
-        response = requests.post(url=url, data=json_data.encode(), headers={"Content-Type": "application/json"})
+        headers = {"Authorization": f"ApiKey {api_key}", "Content-Type": "application/json"}
+        response = requests.post(url=url, data=json_data.encode(), headers=headers, verify=False)
         if json.loads(response.content).get('error'):
             logger.error(f"Send to Elasticsearch responded with error: {response.text}")
         if debug:
@@ -77,6 +79,7 @@ class Elastic:
                              id_metadata_list: List[str] | None = None,
                              hashing: bool = False,
                              server: str = ELK_SERVER,
+                             api_key: str = ELK_TOKEN,
                              batch_size: int = int(BATCH_SIZE),
                              iso_timestamp: str | None = None,
                              debug: bool = False):
@@ -125,10 +128,12 @@ class Elastic:
             # Executing POST to push messages into ELK
             if debug:
                 logger.debug(f"Sending batch ({batch}-{batch + batch_size})/{len(json_message_list)} to {url}")
+            headers = {"Authorization": f"ApiKey {api_key}", "Content-Type": "application/x-ndjson"}
             response = requests.post(url=url,
                                      data=(ndjson.dumps(json_message_list[batch:batch + batch_size])+"\n").encode(),
                                      timeout=None,
-                                     headers={"Content-Type": "application/x-ndjson"})
+                                     headers=headers,
+                                     verify=False)
             if json.loads(response.content).get('errors'):
                 logger.error(f"Send to Elasticsearch responded with errors: {response.text}")
             if debug:
@@ -163,28 +168,28 @@ class HandlerSendToElastic:
     def __init__(self,
                  index: str,
                  server: str = ELK_SERVER,
+                 api_key: str = ELK_TOKEN,
                  id_from_metadata: bool = False,
                  id_metadata_list: List[str] | None = None,
                  hashing: bool = False,
                  headers: Dict | None = None,
-                 auth: object | None = None,
                  verify: bool = False,
                  debug: bool = False):
 
         self.index = index
         self.server = server
+        self.api_key = api_key
         self.id_from_metadata = id_from_metadata
         self.id_metadata_list = id_metadata_list
         self.hashing = hashing
         self.debug = debug
 
         if not headers:
-            headers = {'Content-Type': 'text/json'}
+            headers = {"Authorization": f"ApiKey {api_key}", "Content-Type": "text/json"}
 
         self.session = requests.Session()
         self.session.verify = verify
         self.session.headers.update(headers)
-        self.session.auth = auth
 
     def handle(self, message: bytes, properties: dict,  **kwargs):
 
@@ -195,6 +200,7 @@ class HandlerSendToElastic:
                                                 id_metadata_list=self.id_metadata_list,
                                                 hashing=self.hashing,
                                                 server=self.server,
+                                                api_key=self.api_key,
                                                 debug=self.debug)
 
         logger.info(f"Message sending to Elastic successful: {response}")
@@ -206,7 +212,8 @@ if __name__ == '__main__':
 
     # Create client
     server = "access_url"
-    service = Elastic(server=server)
+    api_key = "acces_token"
+    service = Elastic(server=server, api_key=api_key, debug=True)
 
     # Example get documents by query
     # query = {"match": {"scenario_date": "2023-03-21"}}
@@ -216,7 +223,7 @@ if __name__ == '__main__':
     # json_message = {'user': 'testuser', 'message': None}
     #
     # try:
-    #     Elk.send_to_elastic(index="test", json_message=json_message, server=server, debug=True)
+    #     Elk.send_to_elastic(index="test", json_message=json_message, server=server, api_key=api_key, debug=True)
     # except Exception as error:
     #     print(f"Message sending failed with error {error}")
     #     print(json_message)
