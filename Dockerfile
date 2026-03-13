@@ -24,4 +24,3 @@ RUN uv pip sync pylock.toml --system  && uv cache clean
 RUN mkdir -p /licenses
 COPY LICENSE /licenses/
 COPY licenses/ /licenses/
-COPY NOTICE /licenses/
