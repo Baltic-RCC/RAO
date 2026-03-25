@@ -21,6 +21,7 @@ class Elastic:
 
     def __init__(self, server: str = ELK_SERVER, api_key: str = ELK_TOKEN, debug: bool = False):
         self.server = server
+        self.api_key = api_key
         self.debug = debug
         self.client = Elasticsearch(self.server, api_key=api_key)
 

@@ -233,6 +233,7 @@ class HandlerVirtualOperator:
 
         lf_settings_manager = LoadflowSettingsManager(
             elastic_server=self.object_storage.elastic_service.server,
+            elastic_api_key=self.object_storage.elastic_service.api_key,
             settings_keyword=_loadflow_settings_key,
         )
 
