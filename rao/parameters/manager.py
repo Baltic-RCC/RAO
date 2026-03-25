@@ -42,6 +42,7 @@ class LoadflowSettingsManager:
                  elastic_server: Optional[str] = None,
                  elastic_username: Optional[str] = None,
                  elastic_password: Optional[str] = None,
+                 elastic_api_key: Optional[str] = None,
                  elastic_index: str = 'config-lf-parameters',
                  settings_keyword: str = 'BA_DEFAULT',
                  override_path: Optional[str] = None):
@@ -49,6 +50,7 @@ class LoadflowSettingsManager:
         self.elastic_server = elastic_server
         self.elastic_username = elastic_username
         self.elastic_password = elastic_password
+        self.elastic_api_key = elastic_api_key
         self.elastic_index = elastic_index
         self.settings_keyword = settings_keyword
 
@@ -81,8 +83,9 @@ class LoadflowSettingsManager:
         if not self.elastic_server:
             raise Exception("Elasticsearch server not defined")
         client = Elasticsearch(self.elastic_server)
+        headers = {"Authorization": f"ApiKey {self.elastic_api_key}", "Content-Type": "application/x-ndjson"}
         logger.info(f"Retrieving base loadflow settings fromm Elasticsearch with key: {self.settings_keyword}")
-        response = client.get(index=self.elastic_index, id=self.settings_keyword)
+        response = client.get(index=self.elastic_index, id=self.settings_keyword, headers=headers)
 
         return response.raw["_source"]
 
