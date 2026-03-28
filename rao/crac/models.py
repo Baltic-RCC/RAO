@@ -79,6 +79,7 @@ class NetworkAction(BaseModel):
     id: str
     name: str
     operator: str
+    activationCost: int
     onInstantUsageRules: List[Dict]
     terminalsConnectionActions: Optional[List[TerminalsAction]] = None
     shuntCompensatorPositionActions: Optional[List[ShuntCompensatorPositionAction]] = None
