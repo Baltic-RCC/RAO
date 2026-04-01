@@ -18,7 +18,12 @@ from rao.parameters.manager import RaoSettingsManager
 from rao.parameters.manager import LoadflowSettingsManager
 from rao.optimizer import Optimizer
 from loguru import logger
+from common.telemetry import otel_span
+from opentelemetry import trace
 
+
+# Initialize OpenTelemetry tracer
+tracer = trace.get_tracer(__name__)
 
 parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
 parse_app_properties(caller_globals=globals(),
@@ -76,6 +81,7 @@ class HandlerVirtualOperator:
 
         return [profile['content'] for profile in received_profiles]
 
+    @otel_span("handle.model-retrieving", tracer=tracer)
     def get_network_model(self, content_reference: str):
         # Query merge reports
         metadata = {'content_reference': content_reference}
@@ -160,7 +166,7 @@ class HandlerVirtualOperator:
 
         return results
 
-    @performance_counter(units='seconds')
+    @otel_span("rao.handle", tracer=tracer)
     def handle(self, message: bytes, properties: object, **kwargs):
         """
         Process received SAR profile

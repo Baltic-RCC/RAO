@@ -9,6 +9,7 @@ import time
 from elasticsearch import Elasticsearch
 import pypowsybl
 from common.config_parser import parse_app_properties
+from opentelemetry.trace import get_current_span
 
 
 parse_app_properties(caller_globals=globals(),
@@ -57,6 +58,12 @@ class ElasticLogHandler:
 
         record = message.record
 
+        # Extract OpenTelemetry trace information
+        span = get_current_span()
+        span_ctx = span.get_span_context()
+        trace_id = format(span_ctx.trace_id, '032x') if span_ctx.is_valid else None
+        span_id = format(span_ctx.span_id, '016x') if span_ctx.is_valid else None
+
         # Extract stack trace if available
         exception = record.get('exception')
         stack_trace = None
@@ -77,6 +84,8 @@ class ElasticLogHandler:
             "thread": record["thread"].id,
             "exception": str(record["exception"]) if exception else None,
             "exception_trace": stack_trace,
+            "otel.trace_id": trace_id,
+            "otel.span_id": span_id,
             **record["extra"],  # add extra fields from loguru
             **self.extra,  # add extra fields from self
         }
