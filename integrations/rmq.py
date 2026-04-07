@@ -389,6 +389,9 @@ class RMQConsumer:
         self._executor = ThreadPoolExecutor()
         self._executor_stopped = False
 
+        # Whether a clean shutdown has been requested via signal
+        self._shutdown_requested = False
+
         self._connection_parameters = pika.ConnectionParameters(host=self._host,
                                                                 port=self._port,
                                                                 virtual_host=self._vhost,
@@ -562,9 +565,10 @@ class RMQConsumer:
             except Exception as error:
                 logger.error(f"Message conversion failed: {error}\n{traceback.format_exc()}")
                 ack = False
-                self._channel.basic_reject(basic_deliver.delivery_tag, requeue=False)
-                # self.connection.close()
-                # self.stop()
+                # Schedule reject back on the ioloop thread (channel ops are not thread-safe)
+                self._connection.ioloop.call_soon_threadsafe(
+                    self._channel.basic_reject, basic_deliver.delivery_tag, False
+                )
 
         if self.message_handlers:
 
@@ -581,12 +585,17 @@ class RMQConsumer:
                     # self.stop()
 
         # Publish message to next exchange/queue if provided
-        if self.reply_to:
+        if ack and self.reply_to:
             logger.info(f"Publishing message to exchange/queue: {self.reply_to}")
             self._channel.basic_publish(exchange=self.reply_to, routing_key="", body=body, properties=properties)
 
         if ack:
             self.acknowledge_message(basic_deliver.delivery_tag)
+
+        # If a graceful shutdown was requested, trigger stop after this message
+        if self._shutdown_requested:
+            logger.info("Shutdown requested; stopping consumer after current message")
+            self._connection.ioloop.call_soon_threadsafe(self.stop_consuming)
 
     def on_message(self, _unused_channel, basic_deliver, properties, body):
         """Invoked by pika when a message is delivered from RabbitMQ. The
@@ -669,9 +678,24 @@ class RMQConsumer:
                 self._connection.ioloop.start()
             else:
                 self._connection.ioloop.stop()
-            self._executor.shutdown()
+            self._executor.shutdown(wait=True)
             self._executor_stopped = True
             logger.info(f"Stopped")
+
+    def request_shutdown(self):
+        """
+        Signal-safe entry point called from worker.py's SIGTERM handler.
+        Schedules a graceful stop on the ioloop thread so pika's internals
+        are never touched from the signal handler directly.
+        """
+        if not self._shutdown_requested:
+            self._shutdown_requested = True
+            logger.info("Graceful shutdown requested — will stop after current message")
+            if self._connection and not self._connection.is_closed:
+                # If idle (no message in flight), stop consuming immediately
+                if not self._consuming:
+                    self._connection.ioloop.call_soon_threadsafe(self.stop)
+                # Otherwise _process_messages will call stop_consuming when done
 
 
 class ReconnectingConsumer:
@@ -719,6 +743,11 @@ class ReconnectingConsumer:
             except KeyboardInterrupt:
                 self._consumer.stop()
                 break
+            # Do not reconnect if a graceful shutdown was explicitly requested
+            if self._consumer._shutdown_requested:
+                logger.info("Shutdown requested, not reconnecting")
+                break
+
             self._maybe_reconnect()
 
     def _maybe_reconnect(self):
@@ -741,6 +770,9 @@ class ReconnectingConsumer:
     def stop(self):
         self._consumer.stop()
 
+    def request_shutdown(self):
+        """Delegate graceful shutdown to the inner consumer."""
+        self._consumer.request_shutdown()
 
 if __name__ == '__main__':
     # Testing RMQ API
