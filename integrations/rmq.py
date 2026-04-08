@@ -592,11 +592,6 @@ class RMQConsumer:
         if ack:
             self.acknowledge_message(basic_deliver.delivery_tag)
 
-        # If a graceful shutdown was requested, trigger stop after this message
-        if self._shutdown_requested:
-            logger.info("Shutdown requested; stopping consumer after current message")
-            self._connection.ioloop.call_soon_threadsafe(self.stop_consuming)
-
     def on_message(self, _unused_channel, basic_deliver, properties, body):
         """Invoked by pika when a message is delivered from RabbitMQ. The
         channel is passed for your convenience. The basic_deliver object that
@@ -641,6 +636,7 @@ class RMQConsumer:
         """
         self._consuming = False
         logger.info(f"RabbitMQ acknowledged the cancellation of the consumer: {userdata}")
+        self._executor.shutdown(wait=True)
         self.close_channel()
 
     def close_channel(self):
@@ -678,7 +674,6 @@ class RMQConsumer:
                 self._connection.ioloop.start()
             else:
                 self._connection.ioloop.stop()
-            self._executor.shutdown(wait=True)
             self._executor_stopped = True
             logger.info(f"Stopped")
 
@@ -692,10 +687,7 @@ class RMQConsumer:
             self._shutdown_requested = True
             logger.info("Graceful shutdown requested — will stop after current message")
             if self._connection and not self._connection.is_closed:
-                # If idle (no message in flight), stop consuming immediately
-                if not self._consuming:
-                    self._connection.ioloop.call_soon_threadsafe(self.stop)
-                # Otherwise _process_messages will call stop_consuming when done
+                self._connection.ioloop.add_callback_threadsage(self.stop_consuming)
 
 
 class ReconnectingConsumer:
@@ -773,6 +765,7 @@ class ReconnectingConsumer:
     def request_shutdown(self):
         """Delegate graceful shutdown to the inner consumer."""
         self._consumer.request_shutdown()
+
 
 if __name__ == '__main__':
     # Testing RMQ API

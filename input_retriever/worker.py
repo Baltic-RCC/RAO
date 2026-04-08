@@ -44,7 +44,7 @@ def handle_shutdown(signum, frame):
     pika channel/ioloop methods and those must be invoked from the ioloop
     thread, not from an async signal handler.
     """
-    logger.info(f"Received signal {signum}, requesting graceful shutdown")
+    logger.info(f"Received signal {signal.Signals(signum).name}, requesting graceful shutdown")
     consumer.request_shutdown()
 
 
