@@ -687,7 +687,7 @@ class RMQConsumer:
             self._shutdown_requested = True
             logger.info("Graceful shutdown requested — will stop after current message")
             if self._connection and not self._connection.is_closed:
-                self._connection.ioloop.add_callback_threadsage(self.stop_consuming)
+                self._connection.ioloop.add_callback_threadsafe(self.stop_consuming)
 
 
 class ReconnectingConsumer:
