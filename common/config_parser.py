@@ -41,7 +41,7 @@ def parse_app_properties(caller_globals: Dict[str, Any],
 
         # Check if password needs to be sanitized
         # TODO - maybe add list of keywords to function call and then here list comprehension and any()
-        sanitize = "PASSWORD" in parameter_name
+        sanitize = "PASSWORD" in parameter_name or "TOKEN" in parameter_name
 
         # If parameter is defined in ENV
         if parameter_env_value:
