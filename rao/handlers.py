@@ -14,6 +14,7 @@ from common.object_storage import ObjectStorage
 from common.config_parser import parse_app_properties
 from common.decorators import performance_counter
 from rao.crac.builder import CracBuilder
+from rao.crac.context import CracWorkaroundContext
 from rao.parameters.manager import RaoSettingsManager
 from rao.parameters.manager import LoadflowSettingsManager
 from rao.optimizer import Optimizer
@@ -242,6 +243,21 @@ class HandlerVirtualOperator:
             buffer=network_object,
             parameters=lf_settings_manager.config['CGMES_IMPORT_PARAMETERS'])
 
+        # TODO Temporary: Replace 3w transformers with 3 x 2w transformers in the network
+        three_w_trafos = self.network.get_3_windings_transformers()
+        # Replace only 3w transformers that are XNEs
+        three_w_trafos_to_replace = three_w_trafos.index[three_w_trafos["rated_u1"] >= 330].tolist()
+        pypowsybl.network.replace_3_windings_transformers_with_3_2_windings_transformers(self.network, three_w_trafos_to_replace)
+        logger.info("[TEMPORARY] Replaced 3w transformers with 3 x 2w transformers in the network")
+        two_w_trafos = self.network.get_2_windings_transformers()
+        replaced_ids = set(three_w_trafos_to_replace)
+        replaced_3w_trafos = two_w_trafos[two_w_trafos.index.str.split("-Leg", n=1).str[0].isin(replaced_ids)]
+
+        workaround_ctx = CracWorkaroundContext(
+            enable_3w_trafo_replacement=True,
+            replaced_3w_trafos=replaced_3w_trafos
+        )
+
         # Solve initial loadflow on retrieved model
         logger.info(f"Solve initial loadflow analysis")
         lf_result = pypowsybl.loadflow.run_ac(
@@ -267,7 +283,7 @@ class HandlerVirtualOperator:
         # Create CRAC service
         logger.info(f"Loading network to triplets for CRAC service")
         network_triplets = pd.read_RDF(network_object)
-        crac_service = CracBuilder(data=input_files_data, network=network_triplets)
+        crac_service = CracBuilder(data=input_files_data, network=network_triplets, workaround=workaround_ctx)
         crac_service.get_limits()  # get limits from model and store in CRAC service object
 
         # Group by contingency id
@@ -281,7 +297,7 @@ class HandlerVirtualOperator:
             self.crac = crac_service.build_crac(contingency_ids=[mrid])
 
             # For debugging
-            with open("test-crac.json", "w") as f:
+            with open("crac-3w-test_v2.json", "w") as f:
                 json.dump(self.crac, f, ensure_ascii=False, indent=4)
 
             # Store built CRAC files in S3 storage
@@ -363,9 +379,9 @@ if __name__ == '__main__':
         "sender": "TSOX",
         "senderApplication": "APPX",
         "service": "INPUT-DATA",
-        "scenario-time": datetime(2025, 7, 22, 5, 30),
+        "scenario-time": datetime(2026, 2, 13, 8, 30),
         "time-horizon": "ID",
-        "content-reference": "EMFOS/RMM/RMM_1D_001_20250722T0530Z_BA_ce84d8cf-6ae2-4237-9ab9-34838dcff6b8.zip",
+        "content-reference": "EMFOS/RMM/RMM_09_001_20260213T0730Z_BA_6318372a-1952-494a-92c9-61d541483cac.zip",
     }
     properties = BasicProperties(
         content_type='application/octet-stream',
@@ -375,7 +391,7 @@ if __name__ == '__main__':
         timestamp=1747208205,
         headers=headers,
     )
-    with open(r"C:\Users\martynas.karobcikas\Documents\Python projects\RAO\test-data\SAR_20250609T1230_1D_1.xml", "rb") as file:
+    with open(r"C:\Users\lukas.navickas\Documents\test_data_rao\SAR_20260213T0830_ID_1.xml", "rb") as file:
         file_bytes = file.read()
 
     # Create instance
