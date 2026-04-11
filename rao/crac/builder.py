@@ -40,6 +40,18 @@ class CracBuilder:
         flow_cnecs = list(getattr(self._crac, "flowCnecs", []))
         kept = []
 
+        def _is_nan(value):
+            return isinstance(value, float) and math.isnan(value)
+
+        def _is_invalid_threshold(threshold):
+            min_val = getattr(threshold, "min", None)
+            max_val = getattr(threshold, "max", None)
+
+            min_missing = (min_val == 0) or _is_nan(min_val)
+            max_missing = (max_val == 0) or _is_nan(max_val)
+
+            return min_missing and max_missing
+
         for cnec in flow_cnecs:
             cnec_name = getattr(cnec, "name", None)
 
@@ -47,15 +59,13 @@ class CracBuilder:
             if not isinstance(thresholds, list):
                 thresholds = [thresholds]
 
-            # Flag FlowCNEC as removed if limits min=0, max=0
-            removed = any((getattr(th, "min", None) == 0) and (getattr(th, "max", None) == 0) for th in thresholds)
+            removed = any(_is_invalid_threshold(th) for th in thresholds)
 
             if removed:
-                logger.warning(f"CNEC {cnec_name} removed from the CRAC file due to missing limits")
+                logger.warning(f"CNEC {cnec_name} removed from CRAC file due to missing limits")
             else:
                 kept.append(cnec)
 
-        # Keep only consistent flowCnecs
         setattr(self._crac, "flowCnecs", kept)
 
     def get_limits(self):
