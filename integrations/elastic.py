@@ -32,6 +32,7 @@ class Elastic:
                         server: str = ELK_SERVER,
                         api_key: str = ELK_TOKEN,
                         iso_timestamp: str = None,
+                        index_rollover: bool = True,
                         debug: bool = False):
         """
         Method to send single message to ELK
@@ -40,6 +41,7 @@ class Elastic:
         :param id:
         :param server: url of ELK server
         :param iso_timestamp: message timestamp
+        :param index_rollover: if true, adds monthly indication to index name
         :param debug: flag for debug mode
         :return:
         """
@@ -52,8 +54,9 @@ class Elastic:
         json_message["@timestamp"] = iso_timestamp
 
         # Create server url with relevant index pattern
-        _index = f"{index}-{datetime.datetime.today():%Y%m}"
-        url = f"{server}/{_index}/_doc"
+        if index_rollover:
+            index = f"{index}-{datetime.datetime.today():%Y%m}"
+        url = f"{server}/{index}/_doc"
 
         if id:
             url = url + f"/{id}"
@@ -83,6 +86,7 @@ class Elastic:
                              api_key: str = ELK_TOKEN,
                              batch_size: int = int(BATCH_SIZE),
                              iso_timestamp: str | None = None,
+                             index_rollover: bool = True,
                              debug: bool = False):
         """
         Method to send bulk message to ELK
@@ -94,6 +98,7 @@ class Elastic:
         :param server: url of ELK server
         :param batch_size: maximum size of batch
         :param iso_timestamp: timestamp to be included in documents
+        :param index_rollover: if true, adds monthly indication to index name
         :param debug: flag for debug mode
         :return:
         """
@@ -115,7 +120,8 @@ class Elastic:
         json_message_list = [{**element, '@timestamp': iso_timestamp} for element in json_message_list]
 
         # Define server url with relevant index pattern (monthly indication is added)
-        index = f"{index}-{datetime.datetime.today():%Y%m}"
+        if index_rollover:
+            index = f"{index}-{datetime.datetime.today():%Y%m}"
         url = f"{server}/{index}/_bulk"
 
         if id_from_metadata:
@@ -175,6 +181,7 @@ class HandlerSendToElastic:
                  hashing: bool = False,
                  headers: Dict | None = None,
                  verify: bool = False,
+                 index_rollover: bool = True,
                  debug: bool = False):
 
         self.index = index
@@ -183,6 +190,7 @@ class HandlerSendToElastic:
         self.id_from_metadata = id_from_metadata
         self.id_metadata_list = id_metadata_list
         self.hashing = hashing
+        self.index_rollover = index_rollover
         self.debug = debug
 
         if not headers:
@@ -202,6 +210,7 @@ class HandlerSendToElastic:
                                                 hashing=self.hashing,
                                                 server=self.server,
                                                 api_key=self.api_key,
+                                                index_rollover=self.index_rollover,
                                                 debug=self.debug)
 
         logger.info(f"Message sending to Elastic successful: {response}")
