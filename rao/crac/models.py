@@ -2,6 +2,7 @@ from loguru import logger
 from pydantic import BaseModel, Field, field_serializer, field_validator, AliasChoices
 from typing import Optional, List, Any, Dict, Literal
 import uuid
+from math import isnan
 
 
 class Contingency(BaseModel):
@@ -19,6 +20,13 @@ class Threshold(BaseModel):
     min: float = 0
     max: float = 0
     side: int = 1  # Default side is 1, can be adjusted if needed
+
+    @staticmethod
+    def _is_missing(value: float | None) -> bool:
+        return value is None or value == 0 or (isinstance(value, float) and isnan(value))
+
+    def is_valid(self) -> bool:
+        return not (self._is_missing(self.min) or self._is_missing(self.max))
 
 
 class Cnec(BaseModel):
@@ -117,20 +125,28 @@ class Crac(BaseModel):
     networkActions: List[NetworkAction] = Field(default_factory=list)
 
     @field_serializer("flowCnecs", mode='plain')
-    def exclude_3w_transformer_from_flow_cnecs(self, values: List[FlowCnec]) -> List[FlowCnec]:
-        # TODO TEMPORARY FILTER - remove after September release
+    def serialize_flow_cnecs(self, values: List[FlowCnec]) -> List[FlowCnec]:
         logger.warning(f"[TEMPORARY] Excluding 3W transformers from serialized CNECs for operator: ELERING")
         logger.warning(f"[TEMPORARY] Excluding transformers from serialized CNECs for operator: PSE")
         result = []
         for cnec in values:
+            # Validate thresholds and filter out invalid ones, if all thresholds are invalid, exclude the CNEC
+            filtered_thresholds = [t for t in cnec.thresholds if t.is_valid()]
+            if not filtered_thresholds:
+                logger.warning(f"CNEC excluded due to no valid thresholds: {cnec.name} [{cnec.instant}]")
+                continue
+            cnec.thresholds = filtered_thresholds
+
+            # TODO TEMPORARY FILTERS
+            # Exclude 3W transformers for ELERING
             if "AT" in cnec.name and "10X1001A1001A39W" in cnec.operator:
                 logger.warning(f"3W transformer CNEC excluded: {cnec.name} [{cnec.instant}]")
                 continue
             elif "10XPL-TSO------P" in cnec.operator and cnec.thresholds[0].unit == "apparent":
                 logger.warning(f"Poland area CNEC excluded due to unsupported apparent power limits: {cnec.name} [{cnec.instant}]")
                 continue
-            else:
-                result.append(cnec)
+
+            result.append(cnec)
 
         return result
 
