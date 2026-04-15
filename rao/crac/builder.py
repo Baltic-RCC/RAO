@@ -223,6 +223,21 @@ class CracBuilder:
             logger.warning(f"Assessed element does not exist in network model: {row['IdentifiedObject.name']}")
         assessed_elements = assessed_elements.drop(index=missing.index)
 
+        # TODO [TEMPORARY] - exclude 3W transformers
+        _power_transformers = self.network.type_tableview('PowerTransformer')
+        _transformer_ends = self.network.type_tableview('PowerTransformerEnd')
+        _power_transformers = _power_transformers.merge(
+            _transformer_ends['PowerTransformerEnd.PowerTransformer'].value_counts(),
+            left_index=True,
+            right_index=True,
+            how='left'
+        )
+        transformers_3w = _power_transformers[_power_transformers['count'] == 3]
+        exclude = assessed_elements[assessed_elements['AssessedElement.ConductingEquipment'].isin(transformers_3w.index)]
+        for _, row in exclude.iterrows():
+            logger.warning(f"Assessed element excluded as 3W transformers not supported: {row['IdentifiedObject.name']}")
+        assessed_elements = assessed_elements.drop(index=exclude.index)
+
         for ae in assessed_elements.to_dict('records'):
 
             # Exclude assessed elements which normalEnabled = false

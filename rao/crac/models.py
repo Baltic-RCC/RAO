@@ -126,8 +126,6 @@ class Crac(BaseModel):
 
     @field_serializer("flowCnecs", mode='plain')
     def serialize_flow_cnecs(self, values: List[FlowCnec]) -> List[FlowCnec]:
-        logger.warning(f"[TEMPORARY] Excluding 3W transformers from serialized CNECs for operator: ELERING")
-        logger.warning(f"[TEMPORARY] Excluding transformers from serialized CNECs for operator: PSE")
         result = []
         for cnec in values:
             # Validate thresholds and filter out invalid ones, if all thresholds are invalid, exclude the CNEC
@@ -138,11 +136,7 @@ class Crac(BaseModel):
             cnec.thresholds = filtered_thresholds
 
             # TODO TEMPORARY FILTERS
-            # Exclude 3W transformers for ELERING
-            if "AT" in cnec.name and "10X1001A1001A39W" in cnec.operator:
-                logger.warning(f"3W transformer CNEC excluded: {cnec.name} [{cnec.instant}]")
-                continue
-            elif "10XPL-TSO------P" in cnec.operator and cnec.thresholds[0].unit == "apparent":
+            if "10XPL-TSO------P" in cnec.operator and cnec.thresholds[0].unit == "apparent":
                 logger.warning(f"Poland area CNEC excluded due to unsupported apparent power limits: {cnec.name} [{cnec.instant}]")
                 continue
 
