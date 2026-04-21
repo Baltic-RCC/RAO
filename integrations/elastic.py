@@ -11,7 +11,7 @@ import config
 from common.config_parser import parse_app_properties
 from loguru import logger
 
-parse_app_properties(caller_globals=globals(), path=config.paths.integrations.elastic)
+parse_app_properties(caller_globals=globals(), path=config.paths.integrations.elastic, eval_types=True)
 
 
 class Elastic:
