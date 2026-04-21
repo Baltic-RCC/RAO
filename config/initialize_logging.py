@@ -1,5 +1,6 @@
 import logging
 import inspect
+import os
 from loguru import logger
 import sys
 from pathlib import Path
@@ -44,7 +45,11 @@ class ElasticLogHandler:
         self.index = index
         self.logs_rollover = logs_rollover
         self.extra = extra if extra else {}
-        self.client = Elasticsearch(self.server, api_key=api_key)
+        self.client = Elasticsearch(self.server,
+                                    api_key=api_key,
+                                    verify_certs=os.getenv("ELK_SSL_VERIFY", False),
+                                    ca_certs=os.getenv("SSL_CERT_FILE", "/app/certs/ca-certificates.crt"),
+                                    )
 
         self._connected = True
         self._last_retry = 0
