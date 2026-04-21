@@ -11,7 +11,7 @@ import config
 from common.config_parser import parse_app_properties
 from loguru import logger
 
-parse_app_properties(caller_globals=globals(), path=config.paths.integrations.elastic, eval_types=True)
+parse_app_properties(caller_globals=globals(), path=config.paths.integrations.elastic)
 
 
 class Elastic:
@@ -19,7 +19,7 @@ class Elastic:
     def __init__(self,
                  server: str = ELK_SERVER,
                  api_key: str = ELK_TOKEN,
-                 ssl_verify: bool = ELK_SSL_VERIFY,
+                 ssl_verify: bool = json.loads(ELK_SSL_VERIFY.lower()),
                  debug: bool = False
                  ):
 
@@ -46,7 +46,7 @@ class Elastic:
                         id: str = None,
                         server: str = ELK_SERVER,
                         api_key: str = ELK_TOKEN,
-                        ssl_verify: bool = ELK_SSL_VERIFY,
+                        ssl_verify: bool = json.loads(ELK_SSL_VERIFY.lower()),
                         iso_timestamp: str = None,
                         index_rollover: bool = True,
                         debug: bool = False):
@@ -100,7 +100,7 @@ class Elastic:
                              hashing: bool = False,
                              server: str = ELK_SERVER,
                              api_key: str = ELK_TOKEN,
-                             ssl_verify: bool = ELK_SSL_VERIFY,
+                             ssl_verify: bool = json.loads(ELK_SSL_VERIFY.lower()),
                              batch_size: int = int(BATCH_SIZE),
                              iso_timestamp: str | None = None,
                              index_rollover: bool = True,

@@ -47,7 +47,7 @@ class ElasticLogHandler:
         self.extra = extra if extra else {}
         self.client = Elasticsearch(self.server,
                                     api_key=api_key,
-                                    verify_certs=os.getenv("ELK_SSL_VERIFY", False),
+                                    verify_certs=os.getenv("ELK_SSL_VERIFY", "false").lower() == "true",
                                     ca_certs=os.getenv("SSL_CERT_FILE", "/app/certs/ca-certificates.crt"),
                                     )
 
