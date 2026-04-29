@@ -34,6 +34,40 @@ class CracBuilder:
     def crac_pprint(self):
         return print(json.dumps(self.crac, indent=2))
 
+    def perform_cnec_consistency_check(self):
+
+        # Find the flowCnec thresholds
+        flow_cnecs = list(getattr(self._crac, "flowCnecs", []))
+        kept = []
+
+        def _is_nan(value):
+            return isinstance(value, float) and math.isnan(value)
+
+        def _is_invalid_threshold(threshold):
+            min_val = getattr(threshold, "min", None)
+            max_val = getattr(threshold, "max", None)
+
+            min_missing = (min_val == 0) or _is_nan(min_val)
+            max_missing = (max_val == 0) or _is_nan(max_val)
+
+            return min_missing and max_missing
+
+        for cnec in flow_cnecs:
+            cnec_name = getattr(cnec, "name", None)
+
+            thresholds = getattr(cnec, "thresholds", []) or []
+            if not isinstance(thresholds, list):
+                thresholds = [thresholds]
+
+            removed = any(_is_invalid_threshold(th) for th in thresholds)
+
+            if removed:
+                logger.warning(f"CNEC {cnec_name} removed from CRAC file due to missing limits")
+            else:
+                kept.append(cnec)
+
+        setattr(self._crac, "flowCnecs", kept)
+
     def get_limits(self):
 
         if self.network is None:
@@ -399,6 +433,7 @@ class CracBuilder:
         self.process_cnecs()
         self.process_remedial_actions()
         self.update_limits_from_network()
+        self.perform_cnec_consistency_check()
 
         return self.crac
 
