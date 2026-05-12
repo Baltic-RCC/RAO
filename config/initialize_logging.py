@@ -119,6 +119,7 @@ def std_log_filter(record):
 
 # Configure STDERR (stream) sink according configuration
 logging.basicConfig(handlers=[InterceptHandler()], level=LOG_LEVEL, force=True)
+# logger.level("LVL1", no=1)
 logger.remove()  # remove all existing handlers to have fresh setup
 logger.add(sink=sys.stderr, level=LOG_LEVEL, filter=std_log_filter)
 logger.debug(f"Stream logger initialized with level: {LOG_LEVEL}")

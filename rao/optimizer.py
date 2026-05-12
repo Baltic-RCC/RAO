@@ -13,21 +13,21 @@ class Optimizer:
 
     def __init__(self,
                  network: pypowsybl.network.Network,
-                 crac: str | BytesIO,
+                 crac_source: str | BytesIO,
                  parameters_source: str | BytesIO | None = None,
                  debug: bool = False,
                  ):
 
         self.network = network
-        self.crac = crac
+        self.crac_source = crac_source
         self.parameters_source = parameters_source
         self.debug = debug
 
+        self.crac = None
         self.parameters = None
         self.results = None
 
         self.runner = pypowsybl.rao.create_rao()
-        # self.crac_object = pypowsybl.rao.Crac
 
     @property
     def cnec_results(self):
@@ -53,38 +53,22 @@ class Optimizer:
             self.parameters_source.seek(0)
             logger.info("Loading parameters from in-memory BytesIO buffer")
             self.parameters = pypowsybl.rao.Parameters()
-            # pre pypowsybl 1.14.0 parameters loading
-            # self.parameters.load_from_buffer_source(self.parameters_source)
-
-            # post pypowsybl 1.14.0 parameters loading
-            self.parameters = pypowsybl.rao.Parameters.from_buffer_source(self.parameters_source)
+            self.parameters = self.parameters.from_buffer_source(self.parameters_source)
             logger.info("Parameters loaded successfully from in-memory BytesIO buffer")
         elif isinstance(self.parameters_source, str) or isinstance(self.parameters_source, os.PathLike):
             logger.info(f"Loading parameters from file: {self.parameters_source}")
             self.parameters = pypowsybl.rao.Parameters()
-
-            # pre pypowsybl 1.14.0 parameters loading
-            # self.parameters.load_from_file_source(parameters_file=str(self.parameters_source))
-
-            # post pypowsybl 1.14.0 parameters loading
-            self.parameters = pypowsybl.rao.Parameters.from_file_source(parameters_file=str(self.parameters_source))
+            self.parameters = self.parameters.from_file_source(parameters_file=str(self.parameters_source))
             logger.info(f"Parameters loaded successfully from: {self.parameters_source}")
         else:
             raise TypeError("Unsupported parameter source for load_parameters(): expected str or BytesIO")
 
     def load_crac(self):
-        # pre pypowsybl 1.14.0 CRAC loading
-        # if isinstance(self.crac, str):
-        #     self.runner.set_crac_file_source(network=self.network, crac_file=self.crac)
-        # else:
-        #     self.runner.set_crac_buffer_source(network=self.network, crac_source=self.crac)
-
-        # post pypowsybl 1.14.0 CRAC loading
         if isinstance(self.crac, (str, os.PathLike)):
-            self.crac = pypowsybl.rao.Crac.from_file_source(network=self.network, crac_file=str(self.crac))
+            self.crac = pypowsybl.rao.Crac.from_file_source(network=self.network, crac_file=self.crac_source)
         elif isinstance(self.crac, BytesIO):
             self.crac.seek(0)
-            self.crac = pypowsybl.rao.Crac.from_buffer_source(network=self.network, crac_source=self.crac)
+            self.crac = pypowsybl.rao.Crac.from_buffer_source(network=self.network, crac_source=self.crac_source)
         logger.debug(f"CRAC loaded from: {self.crac if isinstance(self.crac, str) else 'buffer'}")
 
     def clean_network_variants(self):
@@ -108,7 +92,7 @@ class Optimizer:
         self.load_parameters()
         self.load_crac()
         logger.info(f"Starting optimization")
-        self.results = self.runner.run(network=self.network, parameters=self.parameters, crac = self.crac)
+        self.results = self.runner.run(crac=self.crac, network=self.network, parameters=self.parameters)
         self.clean_network_variants()
 
 

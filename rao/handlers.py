@@ -344,7 +344,7 @@ class HandlerVirtualOperator:
 
             # Start the optimization
             optimizer = Optimizer(network=self.network,
-                                  crac=crac_object,
+                                  crac_source=crac_object,
                                   parameters_source=optimizer_settings.to_bytesio(),
                                   debug=self.debug)
             optimizer.run()
