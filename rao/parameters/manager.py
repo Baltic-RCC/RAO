@@ -280,6 +280,8 @@ class RaoSettingsManager:
         "1.11.2": f"{Path(__file__).parent.joinpath('rao_v30.json')}",
         "1.12.0": f"{Path(__file__).parent.joinpath('rao_v31.json')}",
         "1.13.0": f"{Path(__file__).parent.joinpath('rao_v32.json')}",
+        "1.14.0": f"{Path(__file__).parent.joinpath('rao_v321.json')}",
+        "1.15.0": f"{Path(__file__).parent.joinpath('rao_v33.json')}",
     }
 
     def __init__(self):
