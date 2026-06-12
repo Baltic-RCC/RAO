@@ -7,7 +7,7 @@ flowchart TD
     ELKMinio --> CGMBA["CGM_BA"] & COAE["Input data (CO/AE/RA lists in CSA)"]
     COAE --> Conv["Input data conversion (NC profile → internal JSON format)"]
     SAR["SAR (security assessment result) profile"] --> Conv
-    Conv -- CRAC, GLSK, CNEC input --> RAO["RAO (Jenkins job, runs in parallel with CSA)"]
+    Conv -- CRAC, GLSK, CNEC input --> RAO["RAO (Deployed in Kubernetes, runs in parallel with CSA)"]
     RAOParams["RAO Parameters (separate config)"] --> RAO
     RAO --> JSON2NC["Output data conversion (Internal JSON → NC profiles)"]
     RAO -- RAO process logs --> ELK["ELK"]
