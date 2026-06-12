@@ -12,8 +12,7 @@ flowchart TD
     RAO --> JSON2NC["Output data conversion (Internal JSON → NC profiles)"]
     RAO -- RAO process logs --> ELK["ELK"]
     JSON2NC -- RAO Output (SAR) --> ELK
-    CGMBA --> AmpMW["Amp>MW conversion"]
-    AmpMW -- TATL, etc. --> RAO
+    CGMBA --> RAO
     ELK --> ResultsDash["RAO results dashboard"] & LogsDash["RAO logs dashboard"]
     Operator(["Operator"]) -. Assess and validate optimized results,<br>perform RA proposal and coordination .-> ResultsDash
     Operator -. Monitor status, observe errors in logs,<br>report on failure .-> RAO & LogsDash
@@ -33,5 +32,7 @@ flowchart TD
     style ELK fill:#FFFFFF
     style Operator color:#000000
     style BMS fill:#FFFFFF
+
+
 
 
