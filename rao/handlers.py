@@ -14,11 +14,13 @@ from common.object_storage import ObjectStorage
 from common.config_parser import parse_app_properties
 from common.decorators import performance_counter
 from rao.crac.builder import CracBuilder
+from rao.crac.context import CracWorkaroundContext
 from rao.parameters.manager import RaoSettingsManager
 from rao.parameters.manager import LoadflowSettingsManager
 from rao.optimizer import Optimizer
 from loguru import logger
 
+logger.add("app.log")
 
 parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
 parse_app_properties(caller_globals=globals(),
@@ -93,7 +95,7 @@ class HandlerVirtualOperator:
         results = results.drop(columns=_cols_to_pop)
 
         # Transform dataframe from wide format to long by results type using melt
-        _cols_to_melt = ["flowCnecResults", "angleCnecResults", "voltageCnecResults"]
+        _cols_to_melt = ["flowCnecResults"] # TODO to update when voltageCNEC and angleCNEC results are printed
         results = results.melt(id_vars=[col for col in results.columns if col not in _cols_to_melt],
                                value_vars=_cols_to_melt,
                                var_name='cnecResultsType',
@@ -159,6 +161,54 @@ class HandlerVirtualOperator:
             results[_loading_col_name] = np.where(_mask, results[col] / _denominator, np.nan)
 
         return results
+
+    def perform_low_impedance_workaround(self):
+        """ WORKAROUND FOR LOW IMPEDANCE LINES"""
+        # Threshold used to identify problematic lines with low impedance
+        low_impedance_threshold = float(3.0E-5)  # From LF provider parameters lowImpedanceThreshold: '3.0E-5'
+        # olf_default_low_impedance_threshold = float(1.0E-8) From default OLF parameters lowImpedanceThreshold: '1.0E-8'
+
+        logger.info("[WORKAROUND] Performing lowImpedanceThreshold workaround for sensitivity analysis convergence")
+
+        # Because branch impedance is calculated on PU mode, and current network variant is in normal unit mode, we must set network to PU mode temporarily to retrieve relevant r,x values
+        self.network.per_unit = True
+        all_lines_pu = self.network.get_lines(all_attributes=False,
+                                              attributes=['r', 'x', 'connected1', 'connected2', 'fictitious'])
+        all_2w_trafos_pu = self.network.get_2_windings_transformers(all_attributes=False,
+                                                                    attributes=['r', 'x', 'connected1', 'connected2',
+                                                                                'fictitious'])  # TODO NB! only side2 r,x values are retrieved using this function. Assume that they are problematic.
+        # TODO 3w trafos would involve more work to calculate Z magnitude meeting low impedance threshold, as all legs need to be taken into account. For now not taken into account.
+        # all_3w_trafos_pu = self.network.get_3_windings_transformers(all_attributes=True)
+
+        # Filter relevant dfs for low impedance calculation threshold that are in service and not fictitious
+        relevant_lines = all_lines_pu[
+            (all_lines_pu['connected1']) & (all_lines_pu['connected2']) & (~all_lines_pu['fictitious'])].copy()
+        relevant_2w_trafos = all_2w_trafos_pu[(all_2w_trafos_pu['connected1']) & (all_2w_trafos_pu['connected2']) & (
+            ~all_2w_trafos_pu['fictitious'])].copy()
+
+        # Calculate impedance magnitude |Z| = sqrt(r^2 + x^2)
+        relevant_lines["z_abs"] = np.sqrt(relevant_lines["r"] ** 2 + relevant_lines["x"] ** 2)
+        relevant_2w_trafos["z_abs"] = np.sqrt(relevant_2w_trafos["r"] ** 2 + relevant_2w_trafos["x"] ** 2)
+
+        # For lines/2w trafos below the low impedance threshold, replace r and x values so that |Z| is around the low impedance threshold value
+        low_impedance_lines = relevant_lines.index[relevant_lines["z_abs"] < low_impedance_threshold]
+        low_impedance_2w_trafos = relevant_2w_trafos.index[relevant_2w_trafos["z_abs"] < low_impedance_threshold]
+
+        if len(low_impedance_lines) > 0:
+            # For short AC line segments typical X/R is ~10. We replace r and x values accordingly to match this logic for adequate P and Q distribution on relevant branches
+            self.network.update_lines(id=low_impedance_lines, r=[2.8856078516e-6] * len(low_impedance_lines),
+                                      x=[2.8856078516e-5] * len(low_impedance_lines))
+            logger.info(f"[WORKAROUND] Replaced {len(low_impedance_lines)} low impedance line segment r/x values")
+
+        if len(low_impedance_2w_trafos) > 0:
+            # For transformers typical X/R is ~20. We replace r and x values accordingly to match this logic for adequate P and Q distribution on relevant branches
+            self.network.update_2_windings_transformers(id=low_impedance_2w_trafos,
+                                                        r=[4.9938e-6] * len(low_impedance_2w_trafos),
+                                                        x=[9.9875e-5] * len(low_impedance_2w_trafos))
+            logger.info(f"[WORKAROUND] Replaced {len(low_impedance_2w_trafos)} low impedance 2w transformer r/x values")
+
+        # Reset network variant to non-PU mode
+        self.network.per_unit = False
 
     @performance_counter(units='seconds')
     def handle(self, message: bytes, properties: object, **kwargs):
@@ -242,6 +292,22 @@ class HandlerVirtualOperator:
             buffer=network_object,
             parameters=lf_settings_manager.config['CGMES_IMPORT_PARAMETERS'])
 
+        # TODO Temporary: Replace 3w transformers with 3 x 2w transformers in the network
+        three_w_trafos = self.network.get_3_windings_transformers()
+        # Replace only 3w transformers that are XNEs
+        three_w_trafos_to_replace = three_w_trafos.index[ three_w_trafos[ "rated_u1" ] >= 330 ].tolist()
+        pypowsybl.network.replace_3_windings_transformers_with_3_2_windings_transformers(self.network,
+                                                                                         three_w_trafos_to_replace)
+        logger.info("[TEMPORARY] Replaced 3w transformers with 3 x 2w transformers in the network")
+        two_w_trafos = self.network.get_2_windings_transformers()
+        replaced_ids = set(three_w_trafos_to_replace)
+        replaced_3w_trafos = two_w_trafos[ two_w_trafos.index.str.split("-Leg", n=1).str[ 0 ].isin(replaced_ids) ]
+
+        workaround_ctx = CracWorkaroundContext(
+            enable_3w_trafo_replacement=True,
+            replaced_3w_trafos=replaced_3w_trafos
+        )
+
         # Solve initial loadflow on retrieved model
         logger.info(f"Solve initial loadflow analysis")
         lf_result = pypowsybl.loadflow.run_ac(
@@ -267,7 +333,7 @@ class HandlerVirtualOperator:
         # Create CRAC service
         logger.info(f"Loading network to triplets for CRAC service")
         network_triplets = pd.read_RDF(network_object)
-        crac_service = CracBuilder(data=input_files_data, network=network_triplets)
+        crac_service = CracBuilder(data=input_files_data, network=network_triplets, workaround=workaround_ctx)
         crac_service.get_limits()  # get limits from model and store in CRAC service object
 
         # Group by contingency id
@@ -281,7 +347,7 @@ class HandlerVirtualOperator:
             self.crac = crac_service.build_crac(contingency_ids=[mrid])
 
             # For debugging
-            with open("test-crac.json", "w") as f:
+            with open("test-crac-3w-testing.json", "w") as f:
                 json.dump(self.crac, f, ensure_ascii=False, indent=4)
 
             # Store built CRAC files in S3 storage
@@ -291,9 +357,12 @@ class HandlerVirtualOperator:
                                                          bucket_name=S3_BUCKET_RESULTS,
                                                          metadata=properties.headers)
 
+            # Perform lowImpedanceThreshold parameter workaround
+            self.perform_low_impedance_workaround()
+
             # Start the optimization
             optimizer = Optimizer(network=self.network,
-                                  crac=crac_object,
+                                  crac_source=crac_object,
                                   parameters_source=optimizer_settings.to_bytesio(),
                                   debug=self.debug)
             optimizer.run()
@@ -363,9 +432,9 @@ if __name__ == '__main__':
         "sender": "TSOX",
         "senderApplication": "APPX",
         "service": "INPUT-DATA",
-        "scenario-time": datetime(2025, 7, 22, 5, 30),
+        "scenario-time": datetime(2026, 4, 26, 18, 30),
         "time-horizon": "ID",
-        "content-reference": "EMFOS/RMM/RMM_1D_001_20250722T0530Z_BA_ce84d8cf-6ae2-4237-9ab9-34838dcff6b8.zip",
+        "content-reference": "EMFOS/RMM/ID/RMM_12_002_20260417T1730Z_BA_547bf8be-49a1-4eb1-a1f4-2ea10c841722.zip",
     }
     properties = BasicProperties(
         content_type='application/octet-stream',
@@ -375,7 +444,7 @@ if __name__ == '__main__':
         timestamp=1747208205,
         headers=headers,
     )
-    with open(r"C:\Users\martynas.karobcikas\Documents\Python projects\RAO\test-data\SAR_20250609T1230_1D_1.xml", "rb") as file:
+    with open(r"C:\Users\lukas.navickas\Documents\test_data_rao\test_litgrid_prod_model\SAR_20260504T1430_ID_1_637ec819-3e81-426b-bd67-a6fa813662c3.xml", "rb") as file:
         file_bytes = file.read()
 
     # Create instance
