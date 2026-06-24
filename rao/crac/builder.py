@@ -579,7 +579,7 @@ class CracBuilder:
             logger.warning(f"Assessed element does not exist in network model: {row['IdentifiedObject.name']}")
         assessed_elements = assessed_elements.drop(index=missing.index)
 
-        # TODO [TEMPORARY] - exclude 3W transformers
+        # TODO [TEMPORARY] - pre-emptive exclusion of 3W transformers from CNECs, disabled due to 3W workaround.
         # _power_transformers = self.network.type_tableview('PowerTransformer')
         # _transformer_ends = self.network.type_tableview('PowerTransformerEnd')
         # _power_transformers = _power_transformers.merge(
@@ -744,6 +744,133 @@ class CracBuilder:
                 opposite_network_action = network_action.model_copy(update=_updates)
                 self._crac.networkActions.append(opposite_network_action)
 
+    def _get_replaced_3w_grid_state_alteration_ids(self) -> dict[str, list[str]]:
+        """Map replaced 3W transformer IDs to CRAC grid-state alteration IDs.
+
+        The original CRAC remedial action data references the 3W transformer as
+        topology action equipment. After the network workaround replaces that
+        transformer with 2W legs, this mapping identifies which grid-state
+        alterations originally targeted each replaced 3W transformer.
+        """
+        if not self.workaround or not self.workaround.has_3w_replacement():
+            return {}
+
+        base_to_legs = self._get_base_to_legs_map(include_leg3=True)
+        if not base_to_legs:
+            return {}
+
+        try:
+            topology_actions = self.data.type_tableview("TopologyAction", string_to_number=False)
+        except Exception:
+            return {}
+
+        if topology_actions is None or topology_actions.empty:
+            return {}
+
+        equipment_column = None
+        for candidate in "TopologyAction.Equipment":
+            if "TopologyAction.Equipment" in topology_actions.columns:
+                equipment_column = candidate
+                break
+
+        if equipment_column is None or "IdentifiedObject.mRID" not in topology_actions.columns:
+            return {}
+
+        base_ids = set(base_to_legs)
+        result: dict[str, list[str]] = {base_id: [] for base_id in base_ids}
+
+        for row in topology_actions.to_dict("records"):
+            equipment_id = row.get(equipment_column)
+            if equipment_id is None:
+                continue
+
+            equipment_norm = str(equipment_id).lstrip("_")
+            base_norm = equipment_norm.split("-Leg", 1)[0]
+            if base_norm not in base_ids:
+                continue
+
+            alteration_id = row.get("IdentifiedObject.mRID")
+            if alteration_id and alteration_id not in result[base_norm]:
+                result[base_norm].append(alteration_id)
+
+        return {base_id: alteration_ids for base_id, alteration_ids in result.items() if alteration_ids}
+
+    def remedial_actions_3w_workaround(self):
+        """
+        If replace 3w trafo with 3x 2w trafo workaround is enabled, re-build remedial actions
+        to ensure terminal connection actions targeting replaced 3w transformers target all
+        replacement 2w transformer legs instead.
+        """
+        if not self.workaround or not self.workaround.has_3w_replacement():
+            return
+
+        base_to_legs = self._get_base_to_legs_map(include_leg3=True)
+        if not base_to_legs:
+            return
+
+        network_actions = list(getattr(self._crac, "networkActions", []) or [])
+        if not network_actions:
+            return
+
+        leg_re = re.compile(r"-Leg(?P<num>[0-9]+)$", re.IGNORECASE)
+
+        def _leg_sort_key(leg_id: str) -> tuple[int, str]:
+            m = leg_re.search(str(leg_id))
+            if not m:
+                return (999, str(leg_id))
+            try:
+                return (int(m.group("num")), str(leg_id))
+            except Exception:
+                return (999, str(leg_id))
+
+        alteration_ids_by_3w = self._get_replaced_3w_grid_state_alteration_ids()
+        if alteration_ids_by_3w:
+            logger.debug(
+                f"[WORKAROUND] Found remedial action grid-state alterations for replaced 3W transformers: {alteration_ids_by_3w}")
+
+        replaced_count = 0
+        created_count = 0
+
+        for network_action in network_actions:
+            terminal_actions = getattr(network_action, "terminalsConnectionActions", None)
+            if not terminal_actions:
+                continue
+
+            new_terminal_actions: list[models.TerminalsAction] = []
+            replaced_in_network_action = False
+
+            for terminal_action in terminal_actions:
+                elem_id = getattr(terminal_action, "networkElementId", "") or ""
+                elem_norm = str(elem_id).lstrip("_")
+                base_norm = elem_norm.split("-Leg", 1)[0]
+
+                if base_norm not in base_to_legs:
+                    new_terminal_actions.append(terminal_action.model_copy())
+                    continue
+
+                legs = sorted(base_to_legs[base_norm], key=_leg_sort_key)
+                if not legs:
+                    logger.warning(f"[WORKAROUND] Remedial action {network_action.name} references replaced 3W transformer {elem_id}, but no replacement 2W legs were found")
+                    new_terminal_actions.append(terminal_action.model_copy())
+                    continue
+
+                replaced_in_network_action = True
+                replaced_count += 1
+                for leg_id in legs:
+                    new_terminal_actions.append(
+                        terminal_action.model_copy(
+                            update={"networkElementId": self._normalize_grid_element_id(str(leg_id))}
+                        )
+                    )
+                    created_count += 1
+
+            if replaced_in_network_action:
+                network_action.terminalsConnectionActions = new_terminal_actions
+
+        if replaced_count:
+            logger.info(f"[WORKAROUND] Remedial actions: replaced {replaced_count} 3W terminal connection actions with {created_count} leg-specific terminal connection actions"
+            )
+
     @performance_counter(units='seconds')
     def build_crac(self, contingency_ids: list | None = None):
 
@@ -764,11 +891,12 @@ class CracBuilder:
             logger.info("[WORKAROUND] Applying 3w transformer replacement workaround to FlowCNECs")
             self.flowcnecs_3w_workaround()
 
-        # TODO need to also build 3w workaround RAs
-        # if self.workaround:
-        #     logger.info("[WORKAROUND] Applying 3w transformer replacement workaround to Remedial actions")
-
         self.process_remedial_actions()
+        if self.workaround:
+            logger.info("[WORKAROUND] Applying 3w transformer replacement workaround to Remedial actions")
+            self.remedial_actions_3w_workaround()
+
+        # Update the CRAC flowCNEC limits from network
         self.update_limits_from_network()
 
         return self.crac

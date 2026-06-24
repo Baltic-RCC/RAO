@@ -20,8 +20,6 @@ from rao.parameters.manager import LoadflowSettingsManager
 from rao.optimizer import Optimizer
 from loguru import logger
 
-logger.add("app.log")
-
 parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
 parse_app_properties(caller_globals=globals(),
                      path=str(Path(__file__).parent.joinpath("config.properties")),
