@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic AE + ER + CO profile content for testing Voltage/Angle CNEC creation.
+     Structured according to the OpenRAO NC CRAC format documentation examples. -->
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:cim="http://iec.ch/TC57/CIM100#"
+         xmlns:entsoe="http://entsoe.eu/CIM/SchemaExtension/3/1#"
+         xmlns:nc="http://entsoe.eu/ns/nc#">
+
+    <!-- Flow assessed element (existing behaviour, must remain untouched) -->
+    <nc:AssessedElement rdf:ID="_ae-flow-1">
+        <cim:IdentifiedObject.mRID>ae-flow-1</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>XNE Flow LN-1</cim:IdentifiedObject.name>
+        <cim:IdentifiedObject.description>Flow assessed element</cim:IdentifiedObject.description>
+        <nc:AssessedElement.inBaseCase>true</nc:AssessedElement.inBaseCase>
+        <nc:AssessedElement.normalEnabled>true</nc:AssessedElement.normalEnabled>
+        <nc:AssessedElement.AssessedSystemOperator rdf:resource="http://data.europa.eu/energy/EIC/10X1001A1001A39W"/>
+        <nc:AssessedElement.SecuredForRegion rdf:resource="#_baltic-ccr"/>
+        <nc:AssessedElement.ConductingEquipment rdf:resource="#_line-1"/>
+    </nc:AssessedElement>
+
+    <!-- Voltage assessed element: high voltage limit -->
+    <nc:AssessedElement rdf:ID="_ae-voltage-1">
+        <cim:IdentifiedObject.mRID>ae-voltage-1</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>XNE Voltage BB-1 high</cim:IdentifiedObject.name>
+        <cim:IdentifiedObject.description>Voltage assessed element (high)</cim:IdentifiedObject.description>
+        <nc:AssessedElement.inBaseCase>true</nc:AssessedElement.inBaseCase>
+        <nc:AssessedElement.normalEnabled>true</nc:AssessedElement.normalEnabled>
+        <nc:AssessedElement.AssessedSystemOperator rdf:resource="http://data.europa.eu/energy/EIC/10X1001A1001A39W"/>
+        <nc:AssessedElement.ScannedForRegion rdf:resource="#_baltic-ccr"/>
+        <nc:AssessedElement.OperationalLimit rdf:resource="#_voltage-limit-high"/>
+    </nc:AssessedElement>
+
+    <!-- Voltage assessed element: low voltage limit -->
+    <nc:AssessedElement rdf:ID="_ae-voltage-2">
+        <cim:IdentifiedObject.mRID>ae-voltage-2</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>XNE Voltage BB-1 low</cim:IdentifiedObject.name>
+        <cim:IdentifiedObject.description>Voltage assessed element (low)</cim:IdentifiedObject.description>
+        <nc:AssessedElement.inBaseCase>true</nc:AssessedElement.inBaseCase>
+        <nc:AssessedElement.normalEnabled>true</nc:AssessedElement.normalEnabled>
+        <nc:AssessedElement.AssessedSystemOperator rdf:resource="http://data.europa.eu/energy/EIC/10X1001A1001A39W"/>
+        <nc:AssessedElement.ScannedForRegion rdf:resource="#_baltic-ccr"/>
+        <nc:AssessedElement.OperationalLimit rdf:resource="#_voltage-limit-low"/>
+    </nc:AssessedElement>
+
+    <!-- Angle assessed element -->
+    <nc:AssessedElement rdf:ID="_ae-angle-1">
+        <cim:IdentifiedObject.mRID>ae-angle-1</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>XNE Angle BB-1/BB-2</cim:IdentifiedObject.name>
+        <cim:IdentifiedObject.description>Angle assessed element</cim:IdentifiedObject.description>
+        <nc:AssessedElement.inBaseCase>true</nc:AssessedElement.inBaseCase>
+        <nc:AssessedElement.normalEnabled>true</nc:AssessedElement.normalEnabled>
+        <nc:AssessedElement.AssessedSystemOperator rdf:resource="http://data.europa.eu/energy/EIC/10X1001A1001A39W"/>
+        <nc:AssessedElement.ScannedForRegion rdf:resource="#_baltic-ccr"/>
+        <nc:AssessedElement.OperationalLimit rdf:resource="#_voltage-angle-limit-1"/>
+    </nc:AssessedElement>
+
+    <!-- ER profile content: voltage angle limit between terminal-1 (ref) and terminal-2 -->
+    <cim:OperationalLimitSet rdf:ID="_ols-angle-1">
+        <cim:IdentifiedObject.mRID>ols-angle-1</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>Angle limit set</cim:IdentifiedObject.name>
+        <cim:OperationalLimitSet.Terminal rdf:resource="#_terminal-2"/>
+    </cim:OperationalLimitSet>
+    <cim:OperationalLimitType rdf:ID="_olt-angle-abs">
+        <cim:IdentifiedObject.mRID>olt-angle-abs</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>Absolute angle limit type</cim:IdentifiedObject.name>
+        <cim:OperationalLimitType.direction rdf:resource="http://iec.ch/TC57/CIM100#OperationalLimitDirectionKind.absoluteValue"/>
+    </cim:OperationalLimitType>
+    <nc:VoltageAngleLimit rdf:ID="_voltage-angle-limit-1">
+        <cim:IdentifiedObject.mRID>voltage-angle-limit-1</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>Voltage angle limit</cim:IdentifiedObject.name>
+        <cim:OperationalLimit.OperationalLimitType rdf:resource="#_olt-angle-abs"/>
+        <cim:OperationalLimit.OperationalLimitSet rdf:resource="#_ols-angle-1"/>
+        <nc:VoltageAngleLimit.normalValue>30.0</nc:VoltageAngleLimit.normalValue>
+        <nc:VoltageAngleLimit.isFlowToRefTerminal>true</nc:VoltageAngleLimit.isFlowToRefTerminal>
+        <nc:VoltageAngleLimit.AngleReferenceTerminal rdf:resource="#_terminal-1"/>
+    </nc:VoltageAngleLimit>
+
+    <!-- Contingency: loss of line-2 -->
+    <nc:OrdinaryContingency rdf:ID="_co-1">
+        <cim:IdentifiedObject.mRID>co-1</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>N-1 LN-2</cim:IdentifiedObject.name>
+        <nc:Contingency.normalMustStudy>true</nc:Contingency.normalMustStudy>
+    </nc:OrdinaryContingency>
+    <cim:ContingencyEquipment rdf:ID="_ce-1">
+        <cim:IdentifiedObject.mRID>ce-1</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>CE LN-2</cim:IdentifiedObject.name>
+        <cim:ContingencyElement.Contingency rdf:resource="#_co-1"/>
+        <cim:ContingencyEquipment.Equipment rdf:resource="#_line-2"/>
+    </cim:ContingencyEquipment>
+</rdf:RDF>

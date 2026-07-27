@@ -573,6 +573,15 @@ class CracBuilder:
 
         assessed_elements = self.data.type_tableview("AssessedElement", string_to_number=False)
 
+        # Assessed elements defined through an OperationalLimit reference (VoltageLimit / VoltageAngleLimit)
+        # are voltage/angle monitoring CNECs -> handled separately in process_monitoring_cnecs()
+        if 'AssessedElement.ConductingEquipment' not in assessed_elements.columns:
+            assessed_elements['AssessedElement.ConductingEquipment'] = pd.NA
+        if 'AssessedElement.OperationalLimit' in assessed_elements.columns:
+            limit_based = (assessed_elements['AssessedElement.ConductingEquipment'].isna()
+                           & assessed_elements['AssessedElement.OperationalLimit'].notna())
+            assessed_elements = assessed_elements[~limit_based]
+
         # TODO [TEMPORARY] - perform consistency check
         missing = assessed_elements[~assessed_elements['AssessedElement.ConductingEquipment'].isin(self.network.ID)]
         for _, row in missing.iterrows():
@@ -637,6 +646,221 @@ class CracBuilder:
                 )
                 self._crac.flowCnecs.append(cnec_curative)
                 logger.debug(f"Added CNEC {ae['IdentifiedObject.name']} for curative state on contingency: {contingency.name}")
+
+    """
+    Voltage / Angle monitoring CNEC helpers (OpenRAO NC CRAC format)
+    """
+    def _get_object_attributes(self, object_id: str | None) -> dict:
+        """Collect KEY -> VALUE attributes for a given object ID across the NC profile
+        data and the network (EQ/CGMES) triplet stores.
+
+        VoltageAngleLimits (and their limit sets/types) come with the ER profile in `self.data`,
+        while VoltageLimits are defined in the EQ profile in `self.network`, so both stores are checked.
+        """
+        attributes = {}
+        if not object_id:
+            return attributes
+        for store in (self.data, self.network):
+            if store is None:
+                continue
+            rows = store[store.ID == object_id]
+            for key, value in zip(rows.KEY, rows.VALUE):
+                attributes.setdefault(key, value)
+        return attributes
+
+    def _resolve_voltage_level(self, equipment_id: str | None) -> str | None:
+        """Resolve the VoltageLevel that contains a given piece of equipment (e.g. a BusBarSection).
+
+        OpenRAO VoltageCnecs must reference a VoltageLevel of the network model, while the NC profile
+        VoltageLimit's OperationalLimitSet references a BusBarSection. Traverse the equipment
+        containment hierarchy (Equipment.EquipmentContainer / Bay.VoltageLevel) up to the VoltageLevel.
+        """
+        current = equipment_id
+        for _ in range(3):  # BusBarSection -> (Bay) -> VoltageLevel
+            if not current:
+                return None
+            attributes = self._get_object_attributes(current)
+            if attributes.get('Type') == 'VoltageLevel':
+                return current
+            current = attributes.get('Equipment.EquipmentContainer') or attributes.get('Bay.VoltageLevel')
+        return None
+
+    def _resolve_terminal_equipment(self, terminal_id: str | None) -> str | None:
+        """Resolve the conducting equipment referenced by a terminal"""
+        return self._get_object_attributes(terminal_id).get('Terminal.ConductingEquipment')
+
+    def _append_monitoring_cnec(self, cnec, ae: dict):
+        """Append a monitoring CNEC (voltage or angle) to the CRAC for the preventive state
+        (if inBaseCase) and for the curative state of each defined contingency,
+        mirroring the FlowCNEC processing logic."""
+        target = self._crac.voltageCnecs if isinstance(cnec, models.VoltageCnec) else self._crac.angleCnecs
+        cnec_kind = type(cnec).__name__
+
+        in_base_case = str(ae.get("AssessedElement.inBaseCase", "false")).lower() == 'true'
+        if in_base_case:
+            target.append(cnec.model_copy(update={"instant": "preventive", "id": f"{cnec.id}-preventive"}))
+            logger.debug(f"Added {cnec_kind} {cnec.name} for preventive state")
+        else:
+            logger.warning(f"Assessed element excluded from preventive state due to 'inBaseCase' is false: {cnec.name}")
+
+        for contingency in self._crac.contingencies:
+            target.append(cnec.model_copy(
+                update={"contingencyId": contingency.id, "instant": "curative", "id": f"{cnec.id}-curative"}
+            ))
+            logger.debug(f"Added {cnec_kind} {cnec.name} for curative state on contingency: {contingency.name}")
+
+    def _create_voltage_cnec(self, ae: dict, limit_attributes: dict):
+        """Create a VoltageCnec from an assessed element referencing a VoltageLimit.
+
+        Per OpenRAO NC CRAC format:
+            - network element is the VoltageLevel of the BusBarSection referenced by
+              the limit's OperationalLimitSet.Equipment
+            - threshold unit is kilovolt; limitType 'highVoltage' -> max, 'lowVoltage' -> min
+            - only permanent limits (isInfiniteDuration=true, the default) are supported
+        """
+        name = ae['IdentifiedObject.name']
+
+        limit_type_attributes = self._get_object_attributes(limit_attributes.get('OperationalLimit.OperationalLimitType'))
+        limit_set_attributes = self._get_object_attributes(limit_attributes.get('OperationalLimit.OperationalLimitSet'))
+
+        # Only permanent voltage limits (with infinite duration) are handled by OpenRAO
+        if str(limit_type_attributes.get('OperationalLimitType.isInfiniteDuration', 'true')).lower() == 'false':
+            logger.warning(f"VoltageCnec excluded, only permanent voltage limits (infinite duration) are supported: {name}")
+            return
+
+        try:
+            value = float(limit_attributes.get('VoltageLimit.value'))
+        except (TypeError, ValueError):
+            logger.warning(f"VoltageCnec excluded due to missing or invalid VoltageLimit value: {name}")
+            return
+
+        limit_kind = str(limit_type_attributes.get('OperationalLimitType.limitType', ''))
+        if limit_kind.endswith('highVoltage'):
+            threshold = models.MonitoringThreshold(unit='kilovolt', max=value)
+        elif limit_kind.endswith('lowVoltage'):
+            threshold = models.MonitoringThreshold(unit='kilovolt', min=value)
+        else:
+            logger.warning(f"VoltageCnec excluded, voltage limit can only be of kind highVoltage or lowVoltage: {name}")
+            return
+
+        # Resolve BusBarSection referenced by the limit set to its VoltageLevel
+        equipment_id = (limit_set_attributes.get('OperationalLimitSet.Equipment')
+                        or self._resolve_terminal_equipment(limit_set_attributes.get('OperationalLimitSet.Terminal')))
+        voltage_level_id = self._resolve_voltage_level(equipment_id)
+        if not voltage_level_id:
+            logger.warning(f"VoltageCnec excluded, could not resolve VoltageLevel for equipment {equipment_id}: {name}")
+            return
+
+        cnec = models.VoltageCnec(
+            id=f"{ae['IdentifiedObject.mRID']}",
+            name=name,
+            description=ae.get('IdentifiedObject.description') or "",
+            networkElementId=voltage_level_id,
+            operator=ae['AssessedElement.AssessedSystemOperator'],
+            thresholds=[threshold],
+            monitored=True,
+            optimized=False,  # VoltageCnecs cannot be optimized by the RAO, only monitored
+        )
+        self._append_monitoring_cnec(cnec, ae)
+
+    def _create_angle_cnec(self, ae: dict, limit_attributes: dict):
+        """Create an AngleCnec from an assessed element referencing a VoltageAngleLimit (ER profile).
+
+        Per OpenRAO NC CRAC format:
+            - terminal_1 = VoltageAngleLimit.AngleReferenceTerminal, terminal_2 = OperationalLimitSet.Terminal
+            - isFlowToRefTerminal true -> exporting=terminal_1, importing=terminal_2 (false/missing -> reversed)
+            - threshold unit is degree; direction 'high' -> max=+value, 'low' -> min=-value,
+              'absoluteValue' -> min=-value and max=+value
+            - if direction is not 'absoluteValue', isFlowToRefTerminal must be present, otherwise ignored
+        """
+        name = ae['IdentifiedObject.name']
+
+        limit_type_attributes = self._get_object_attributes(limit_attributes.get('OperationalLimit.OperationalLimitType'))
+        limit_set_attributes = self._get_object_attributes(limit_attributes.get('OperationalLimit.OperationalLimitSet'))
+
+        try:
+            value = float(limit_attributes.get('VoltageAngleLimit.normalValue'))
+        except (TypeError, ValueError):
+            logger.warning(f"AngleCnec excluded due to missing or invalid VoltageAngleLimit normalValue: {name}")
+            return
+        if value < 0:
+            logger.warning(f"AngleCnec excluded, VoltageAngleLimit normalValue must be positive: {name}")
+            return
+
+        direction = str(limit_type_attributes.get('OperationalLimitType.direction', ''))
+        flow_to_ref = limit_attributes.get('VoltageAngleLimit.isFlowToRefTerminal')
+        if direction.endswith('absoluteValue'):
+            threshold = models.MonitoringThreshold(unit='degree', min=-value, max=value)
+        elif direction.endswith('.high'):
+            threshold = models.MonitoringThreshold(unit='degree', max=value)
+        elif direction.endswith('.low'):
+            threshold = models.MonitoringThreshold(unit='degree', min=-value)
+        else:
+            logger.warning(f"AngleCnec excluded due to unsupported OperationalLimitType direction '{direction}': {name}")
+            return
+        if not direction.endswith('absoluteValue') and flow_to_ref is None:
+            logger.warning(f"AngleCnec excluded, 'isFlowToRefTerminal' must be defined when direction is not absoluteValue: {name}")
+            return
+
+        # Resolve the two terminals into network elements (importing / exporting ends)
+        terminal_1 = self._resolve_terminal_equipment(limit_attributes.get('VoltageAngleLimit.AngleReferenceTerminal'))
+        terminal_2 = self._resolve_terminal_equipment(limit_set_attributes.get('OperationalLimitSet.Terminal'))
+        if not terminal_1 or not terminal_2:
+            logger.warning(f"AngleCnec excluded, could not resolve terminal network elements: {name}")
+            return
+
+        if str(flow_to_ref).lower() == 'true':
+            exporting_element, importing_element = terminal_1, terminal_2
+        else:
+            exporting_element, importing_element = terminal_2, terminal_1
+
+        cnec = models.AngleCnec(
+            id=f"{ae['IdentifiedObject.mRID']}",
+            name=name,
+            description=ae.get('IdentifiedObject.description') or "",
+            exportingNetworkElementId=exporting_element,
+            importingNetworkElementId=importing_element,
+            operator=ae['AssessedElement.AssessedSystemOperator'],
+            thresholds=[threshold],
+            monitored=True,
+            optimized=False,  # AngleCnecs cannot be optimized by the RAO, only monitored
+        )
+        self._append_monitoring_cnec(cnec, ae)
+
+    def process_monitoring_cnecs(self):
+        """
+        Create Voltage CNECs and Angle CNECs from assessed elements defined through an
+        OperationalLimit reference, per the OpenRAO NC CRAC format:
+            - AssessedElement.OperationalLimit -> VoltageLimit      => VoltageCnec
+            - AssessedElement.OperationalLimit -> VoltageAngleLimit => AngleCnec
+        All assessed elements (incl. Baltic CCR XNEs) present in the AE profile are processed;
+        the same normalEnabled / inBaseCase / contingency synchronization rules apply as for FlowCNECs.
+        """
+        assessed_elements = self.data.type_tableview("AssessedElement", string_to_number=False)
+
+        if 'AssessedElement.OperationalLimit' not in assessed_elements.columns:
+            logger.info("No limit-based assessed elements found, skipping voltage/angle CNEC creation")
+            return
+
+        limit_based = assessed_elements[assessed_elements['AssessedElement.OperationalLimit'].notna()]
+        logger.info(f"Processing {len(limit_based)} limit-based assessed elements for voltage/angle CNECs")
+
+        for ae in limit_based.to_dict('records'):
+
+            # Exclude assessed elements which normalEnabled = false
+            if str(ae.get('AssessedElement.normalEnabled', 'false')).lower() == 'false':
+                logger.warning(f"Assessed element excluded due to 'normalEnabled' is false or missing: {ae['IdentifiedObject.name']}")
+                continue
+
+            limit_attributes = self._get_object_attributes(ae['AssessedElement.OperationalLimit'])
+            limit_type = limit_attributes.get('Type')
+
+            if limit_type == 'VoltageLimit':
+                self._create_voltage_cnec(ae, limit_attributes)
+            elif limit_type == 'VoltageAngleLimit':
+                self._create_angle_cnec(ae, limit_attributes)
+            else:
+                logger.warning(f"Assessed element excluded, unsupported OperationalLimit type '{limit_type}': {ae['IdentifiedObject.name']}")
 
     def process_remedial_actions(self):
         """
@@ -886,6 +1110,7 @@ class CracBuilder:
             logger.info("[WORKAROUND] Applying 3w transformer replacement workaround to contingencies")
             self.contingencies_3w_workaround()
         self.process_cnecs()
+        self.process_monitoring_cnecs()
 
         if self.workaround:
             logger.info("[WORKAROUND] Applying 3w transformer replacement workaround to FlowCNECs")
