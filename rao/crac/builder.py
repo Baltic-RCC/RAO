@@ -15,6 +15,11 @@ class CracBuilder:
     This class is a placeholder and can be extended with specific pre-processing methods.
     """
 
+    # TODO move to config.properties once the monitoring scope is agreed
+    # Voltage monitoring scope: transmission levels of the Baltic region only
+    MIN_MONITORED_NOMINAL_VOLTAGE_KV = 330.0
+    EXCLUDED_MODEL_AUTHORS = ("PSE",)  # outside the Baltic CCR
+
     def __init__(self, data: pd.DataFrame, network: pd.DataFrame | None, workaround: CracWorkaroundContext | None = None):
         logger.info(f"CRAC builder initialized")
         self.data = data
@@ -22,6 +27,14 @@ class CracBuilder:
         self.limits = None
         self._crac = None
         self.workaround = workaround or CracWorkaroundContext()
+
+        # BaseVoltage nominal voltages live in the EQ boundary file, capture them before it is excluded
+        self.base_voltages = {}
+        try:
+            self.base_voltages = self.network.type_tableview(
+                "BaseVoltage", string_to_number=True)["BaseVoltage.nominalVoltage"].to_dict()
+        except Exception:
+            logger.warning("BaseVoltage nominal voltages not available in network model")
 
         # TODO [TEMPORARY] exclude boundary set
         boundary_files = self.network[(self.network.KEY == 'label') & (self.network.VALUE.str.contains("ENTSOE"))]
@@ -910,16 +923,45 @@ class CracBuilder:
 
         return resolved
 
+    def _get_out_of_scope_voltage_levels(self) -> set:
+        """VoltageLevels declared in model instance files of out-of-scope TSOs.
+
+        Voltage limits read from the EQ profile carry no TSO information, so areas outside the
+        Baltic CCR (PSE / Poland) are identified by the instance file that declares them, using
+        the same approach as the boundary set exclusion in __init__.
+        """
+        if self.network is None or not self.EXCLUDED_MODEL_AUTHORS:
+            return set()
+
+        pattern = "|".join(self.EXCLUDED_MODEL_AUTHORS)
+        labels = self.network[(self.network.KEY == 'label')
+                              & (self.network.VALUE.str.contains(pattern, case=False, na=False))]
+        if labels.empty:
+            return set()
+
+        rows = self.network[self.network.INSTANCE_ID.isin(labels.INSTANCE_ID)]
+        excluded = set(rows[(rows.KEY == 'Type') & (rows.VALUE == 'VoltageLevel')].ID)
+
+        if excluded:
+            logger.info(f"Excluding {len(excluded)} out-of-scope voltage levels from files: {sorted(set(labels.VALUE))}")
+        return excluded
+
     def process_voltage_cnecs_from_network(self):
         """Create VoltageCnecs from the VoltageLimits defined in the network model (EQ profile).
 
         The Baltic AE profiles do not declare voltage assessed elements, so voltage CNECs cannot be
         created through AssessedElement.OperationalLimit (see process_monitoring_cnecs). Instead they
-        are derived directly from the EQ VoltageLimits for every VoltageLevel that has them.
+        are derived directly from the EQ VoltageLimits.
 
-        Threshold mapping per instant (mirrors the PATL/TATL logic used for FlowCNECs):
-            preventive : max = highVoltage,  min = permanent lowVoltage (NVLO)
-            curative   : max = highVoltage,  min = temporary lowVoltage (EVLO), fallback to NVLO
+        Monitoring scope:
+            - Baltic region only, model files of out-of-scope TSOs are excluded
+            - transmission voltage levels only (nominal voltage >= MIN_MONITORED_NOMINAL_VOLTAGE_KV)
+
+        Thresholds are the permanent voltage limits: max = highVoltage (NVHI), min = permanent
+        lowVoltage (NVLO). Temporary (emergency) low voltage limits are intentionally not used.
+
+        Voltage CNECs are only monitored (never optimised), so they are created for the curative
+        instant alone - the state after a contingency, where voltage deviations actually occur.
         """
         if self.limits is None:
             self.get_limits()
@@ -928,11 +970,14 @@ class CracBuilder:
             logger.info("No VoltageLimits found in network model, skipping voltage CNEC creation")
             return
 
+        if not self._crac.contingencies:
+            logger.warning("No contingencies defined, skipping voltage CNEC creation (curative instant only)")
+            return
+
         limits = self.limits
 
         # Diagnostics: what the network model actually provides for voltage limits
-        logger.info(f"Voltage limit columns available: {[c for c in limits.columns if 'Voltage' in c or 'Duration' in c]}")
-        logger.info(f"Operational limit types in network model:\n{limits['OperationalLimitType.limitType'].value_counts()}")
+        logger.debug(f"Voltage limit columns available: {[c for c in limits.columns if 'Voltage' in c or 'Duration' in c]}")
 
         value = pd.to_numeric(limits["VoltageLimit.value"], errors="coerce")
         limit_kind = limits["OperationalLimitType.limitType"].fillna("").astype(str)
@@ -953,61 +998,73 @@ class CracBuilder:
                 return {}
             return value[selection].groupby(voltage_level[selection]).agg(how).to_dict()
 
-        high = _aggregate(limit_kind.str.endswith("highVoltage"), "min")
-        low_permanent = _aggregate(limit_kind.str.endswith("lowVoltage") & (duration == 0), "max")
-        low_temporary = _aggregate(limit_kind.str.endswith("lowVoltage") & (duration > 0), "min")
+        # Permanent limits only, strictest value per voltage level
+        high = _aggregate(limit_kind.str.endswith("highVoltage") & (duration == 0), "min")
+        low = _aggregate(limit_kind.str.endswith("lowVoltage") & (duration == 0), "max")
 
         unresolved = int((value.notna() & limits["ID_Equipment"].notna() & voltage_level.isna()).sum())
         if unresolved:
-            logger.warning(f"{unresolved} VoltageLimits skipped, containing VoltageLevel could not be resolved")
+            logger.debug(f"{unresolved} VoltageLimits skipped, containing VoltageLevel could not be resolved")
 
+        # Nominal voltage per VoltageLevel, used to keep only the transmission levels
+        nominal_voltages = {}
+        names = {}
         try:
-            names = self.network.type_tableview("VoltageLevel", string_to_number=False)["IdentifiedObject.name"].to_dict()
+            voltage_levels = self.network.type_tableview("VoltageLevel", string_to_number=False)
+            if "VoltageLevel.BaseVoltage" in voltage_levels.columns:
+                nominal_voltages = voltage_levels["VoltageLevel.BaseVoltage"].map(self.base_voltages).dropna().to_dict()
+            if "IdentifiedObject.name" in voltage_levels.columns:
+                names = voltage_levels["IdentifiedObject.name"].to_dict()
         except Exception:
-            names = {}
+            pass
+        if not nominal_voltages:
+            logger.warning("Nominal voltages unavailable, voltage level threshold filter is not applied")
+
+        out_of_scope = self._get_out_of_scope_voltage_levels()
 
         # Do not duplicate voltage CNECs already created from assessed elements
         already_created = {cnec.networkElementId for cnec in self._crac.voltageCnecs}
 
         created = 0
-        for element_id in sorted(set(high) | set(low_permanent) | set(low_temporary)):
+        skipped_out_of_scope = 0
+        skipped_below_threshold = 0
+
+        for element_id in sorted(set(high) | set(low)):
+
+            if element_id in out_of_scope:
+                skipped_out_of_scope += 1
+                continue
+
+            nominal = nominal_voltages.get(element_id)
+            if nominal is not None and float(nominal) < self.MIN_MONITORED_NOMINAL_VOLTAGE_KV:
+                skipped_below_threshold += 1
+                continue
 
             if element_id in already_created:
                 logger.debug(f"VoltageCnec already created from assessed element, skipping: {element_id}")
                 continue
 
             name = names.get(element_id) or element_id
-            max_value = high.get(element_id)
-            min_permanent = low_permanent.get(element_id)
-            min_curative = low_temporary.get(element_id)
-
-            if min_curative is None and min_permanent is not None:
-                logger.debug(f"Temporary low voltage limit is missing for {name}, using permanent value instead")
-                min_curative = min_permanent
-
-            cnec = models.VoltageCnec(
-                id=f"{element_id}-voltage-preventive",
-                name=f"{name} voltage",
-                description="",
-                networkElementId=element_id,
-                operator="",  # TODO not available on EQ VoltageLimits, resolve operating TSO if required
-                thresholds=[models.MonitoringThreshold(unit="kilovolt", max=max_value, min=min_permanent)],
-                instant="preventive",
-            )
-            self._crac.voltageCnecs.append(cnec)
-            created += 1
-            logger.debug(f"Added VoltageCnec {name} for preventive state")
+            thresholds = [models.MonitoringThreshold(unit="kilovolt", max=high.get(element_id), min=low.get(element_id))]
 
             for contingency in self._crac.contingencies:
-                self._crac.voltageCnecs.append(cnec.model_copy(update={
-                    "id": f"{element_id}-voltage-curative",
-                    "instant": "curative",
-                    "contingencyId": contingency.id,
-                    "thresholds": [models.MonitoringThreshold(unit="kilovolt", max=max_value, min=min_curative)],
-                }))
+                self._crac.voltageCnecs.append(models.VoltageCnec(
+                    id=f"{element_id}-voltage-curative-{contingency.id}",
+                    name=f"{name} voltage",
+                    description="",
+                    networkElementId=element_id,
+                    operator="",  # TODO not available on EQ VoltageLimits, resolve operating TSO if required
+                    thresholds=thresholds,
+                    instant="curative",
+                    contingencyId=contingency.id,
+                ))
                 created += 1
                 logger.debug(f"Added VoltageCnec {name} for curative state on contingency: {contingency.name}")
 
+        if skipped_out_of_scope:
+            logger.info(f"{skipped_out_of_scope} voltage levels skipped, outside the Baltic region")
+        if skipped_below_threshold:
+            logger.info(f"{skipped_below_threshold} voltage levels skipped, nominal voltage below {self.MIN_MONITORED_NOMINAL_VOLTAGE_KV} kV")
         logger.info(f"Created {created} voltage CNECs from network model VoltageLimits")
 
     def process_angle_cnecs_from_data(self):

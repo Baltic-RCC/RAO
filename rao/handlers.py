@@ -47,7 +47,7 @@ class HandlerVirtualOperator:
         self.crac = None
 
     def get_input_profiles(self):
-        requested_profile_types = ["CO", "AE", "RA"]
+        requested_profile_types = ["CO", "AE", "RA", "ER"]  # ER carries the VoltageAngleLimits for angle CNECs
         received_profiles = self.object_storage.get_input_data_for_timestamp(type_keyword=requested_profile_types,
                                                                              scenario_timestamp=self.scenario_timestamp)
 
@@ -349,7 +349,7 @@ class HandlerVirtualOperator:
                 json.dump(self.crac, f, ensure_ascii=False, indent=4)
 
             # Store built CRAC files in S3 storage
-            crac_object = BytesIO(json.dumps(self.crac).encode('utf-8'))
+            crac_object = BytesIO(json.dumps(self.crac, ensure_ascii=False, indent=2).encode('utf-8'))
             crac_object.name = f"RAO/CRAC_{properties.headers['time-horizon']}_{self.scenario_timestamp:%Y%m%dT%H%M}_CO_{mrid}.json"
             self.object_storage.s3_service.upload_object(file_path_or_file_object=crac_object,
                                                          bucket_name=S3_BUCKET_RESULTS,
