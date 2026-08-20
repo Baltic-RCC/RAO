@@ -294,8 +294,14 @@ class HandlerVirtualOperator:
         three_w_trafos = self.network.get_3_windings_transformers()
         # Replace only 3w transformers that are XNEs
         three_w_trafos_to_replace = three_w_trafos.index[ three_w_trafos[ "rated_u1" ] >= 330 ].tolist()
-        pypowsybl.network.replace_3_windings_transformers_with_3_2_windings_transformers(self.network,
-                                                                                         three_w_trafos_to_replace)
+        for tid in three_w_trafos_to_replace:
+            if tid not in self.network.get_3_windings_transformers().index:
+                logger.warning(f"Skipping {tid}: deleted from network [removed eq error not solved]")
+                continue
+            try:
+                pypowsybl.network.replace_3_windings_transformers_with_3_2_windings_transformers(self.network, [tid])
+            except Exception as e:
+                logger.error(f"Failed to replace {tid}: {e}")
         logger.info("[TEMPORARY] Replaced 3w transformers with 3 x 2w transformers in the network")
         two_w_trafos = self.network.get_2_windings_transformers()
         replaced_ids = set(three_w_trafos_to_replace)
