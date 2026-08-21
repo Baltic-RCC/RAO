@@ -400,8 +400,12 @@ class HandlerVirtualOperator:
             logger.info(f"Post-processing results")
             results = self.post_process_results(results=pd.json_normalize(results))
 
+            # Strip -Leg1/Leg2 from the 2w trafo CNECs that were replaced with the 3w-2w workaround
+            violation_ids = set("_" + data['PowerFlowResult.ACDCTerminal'].astype(str))
+            base_element_ids = (results["cnec.networkElementId"].astype(str).str.replace(r'-Leg\d+$', '', regex=True))
+
             # Flag CNECs which were identified as violations from received SAR profile
-            results['cnec.sourceViolation'] = results['cnec.networkElementId'].isin(data['PowerFlowResult.ACDCTerminal'].apply(lambda x: f"_{x}"))
+            results['cnec.sourceViolation'] = base_element_ids.isisn(violation_ids)
 
             # Logging status of successful optimization process for contingency
             logger.success(f"Optimization successful for contingency: {mrid}")
