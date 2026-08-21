@@ -674,6 +674,144 @@ class CracBuilder:
                 self._crac.flowCnecs.append(cnec_curative)
                 logger.debug(f"Added CNEC {ae['IdentifiedObject.name']} for curative state on contingency: {contingency.name}")
 
+    """Dormant ER VoltageAngleLimit -> AngleCnec support."""
+    def _get_object_attributes(self, object_id: str | None) -> dict:
+        """Collect an object's attributes from the NC and EQ triplet stores."""
+        if not object_id:
+            return {}
+
+        attributes = {}
+        for store in (self.data, self.network):
+            if store is None:
+                continue
+            rows = store[store.ID == object_id]
+            for key, value in zip(rows.KEY, rows.VALUE):
+                attributes.setdefault(key, value)
+        return attributes
+
+    def _resolve_terminal_equipment(self, terminal_id: str | None) -> str | None:
+        """Resolve a Terminal reference to its ConductingEquipment."""
+        return self._get_object_attributes(terminal_id).get("Terminal.ConductingEquipment")
+
+    def _append_angle_cnec(self, cnec: models.AngleCnec, in_base_case: bool) -> None:
+        """Append preventive and contingency-specific copies of an angle CNEC."""
+        if self._crac.angleCnecs is None:
+            self._crac.angleCnecs = []
+
+        if in_base_case:
+            self._crac.angleCnecs.append(cnec.model_copy(update={
+                "instant": "preventive",
+                "id": f"{cnec.id}-preventive",
+            }))
+        else:
+            logger.warning(f"AngleCnec excluded from preventive state because inBaseCase is false: {cnec.name}")
+
+        for contingency in self._crac.contingencies:
+            self._crac.angleCnecs.append(cnec.model_copy(update={
+                "contingencyId": contingency.id,
+                "instant": "curative",
+                "id": f"{cnec.id}-curative",
+            }))
+
+    def _create_angle_cnec(self, assessed_element: dict, limit_attributes: dict) -> None:
+        """Create an AngleCnec from one ER VoltageAngleLimit."""
+        name = assessed_element["IdentifiedObject.name"]
+        limit_type = self._get_object_attributes(
+            limit_attributes.get("OperationalLimit.OperationalLimitType")
+        )
+        limit_set = self._get_object_attributes(
+            limit_attributes.get("OperationalLimit.OperationalLimitSet")
+        )
+
+        try:
+            value = float(limit_attributes.get("VoltageAngleLimit.normalValue"))
+        except (TypeError, ValueError):
+            logger.warning(f"AngleCnec excluded due to missing or invalid VoltageAngleLimit normalValue: {name}")
+            return
+        if value < 0:
+            logger.warning(f"AngleCnec excluded because VoltageAngleLimit normalValue is negative: {name}")
+            return
+
+        direction = str(limit_type.get("OperationalLimitType.direction", ""))
+        flow_to_reference = limit_attributes.get("VoltageAngleLimit.isFlowToRefTerminal")
+        if direction.endswith("absoluteValue"):
+            threshold = models.MonitoringThreshold(unit="degree", min=-value, max=value)
+        elif direction.endswith(".high"):
+            threshold = models.MonitoringThreshold(unit="degree", max=value)
+        elif direction.endswith(".low"):
+            threshold = models.MonitoringThreshold(unit="degree", min=-value)
+        else:
+            logger.warning(f"AngleCnec excluded due to unsupported OperationalLimitType direction '{direction}': {name}")
+            return
+        if not direction.endswith("absoluteValue") and flow_to_reference is None:
+            logger.warning(f"AngleCnec excluded because isFlowToRefTerminal is missing: {name}")
+            return
+
+        reference_element = self._resolve_terminal_equipment(
+            limit_attributes.get("VoltageAngleLimit.AngleReferenceTerminal")
+        )
+        limited_element = self._resolve_terminal_equipment(
+            limit_set.get("OperationalLimitSet.Terminal")
+        )
+        if not reference_element or not limited_element:
+            logger.warning(f"AngleCnec excluded because its terminal equipment could not be resolved: {name}")
+            return
+
+        if str(flow_to_reference).lower() == "true":
+            exporting_element, importing_element = reference_element, limited_element
+        else:
+            exporting_element, importing_element = limited_element, reference_element
+
+        cnec = models.AngleCnec(
+            id=str(assessed_element["IdentifiedObject.mRID"]),
+            name=name,
+            description=assessed_element.get("IdentifiedObject.description") or "",
+            exportingNetworkElementId=exporting_element,
+            importingNetworkElementId=importing_element,
+            operator=assessed_element.get("AssessedElement.AssessedSystemOperator") or "",
+            thresholds=[threshold],
+        )
+        in_base_case = str(assessed_element.get("AssessedElement.inBaseCase", "false")).lower() == "true"
+        self._append_angle_cnec(cnec, in_base_case)
+
+    def process_angle_cnecs_from_data(self) -> None:
+        """Create AngleCnecs from ER VoltageAngleLimits when explicitly requested.
+
+        This method is intentionally not called by :meth:`build_crac`. It is retained
+        for the future ER-profile angle-monitoring workflow.
+        """
+        try:
+            angle_limits = self.data.type_tableview("VoltageAngleLimit", string_to_number=False)
+        except Exception:
+            angle_limits = None
+
+        if angle_limits is None or angle_limits.empty:
+            logger.info("No ER VoltageAngleLimits found, skipping angle CNEC creation")
+            return
+
+        created_before = len(self._crac.angleCnecs or [])
+        existing = {
+            str(cnec.id).rsplit("-", 1)[0]
+            for cnec in self._crac.angleCnecs or []
+        }
+        for limit_id, row in angle_limits.iterrows():
+            limit_attributes = row.to_dict()
+            mrid = limit_attributes.get("IdentifiedObject.mRID") or limit_id
+            if str(mrid) in existing:
+                logger.debug(f"AngleCnec already exists for VoltageAngleLimit: {mrid}")
+                continue
+
+            self._create_angle_cnec({
+                "IdentifiedObject.mRID": mrid,
+                "IdentifiedObject.name": limit_attributes.get("IdentifiedObject.name") or str(mrid),
+                "IdentifiedObject.description": limit_attributes.get("IdentifiedObject.description") or "",
+                "AssessedElement.inBaseCase": "true",
+            }, limit_attributes)
+
+        logger.info(
+            f"Created {len(self._crac.angleCnecs or []) - created_before} angle CNECs from ER VoltageAngleLimits"
+        )
+
     """
     Voltage CNECs derived directly from the network model (EQ profile)
     """
@@ -1134,6 +1272,8 @@ class CracBuilder:
             self.contingencies_3w_workaround()
         self.process_cnecs()
         self.process_voltage_cnecs_from_network()
+        # Angle CNECs are opt-in. Keep process_angle_cnecs_from_data() dormant until
+        # the ER-profile angle-monitoring workflow is enabled.
 
         if self.workaround:
             logger.info("[WORKAROUND] Applying 3w transformer replacement workaround to FlowCNECs")
