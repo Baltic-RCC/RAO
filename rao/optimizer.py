@@ -26,6 +26,7 @@ class Optimizer:
         self.crac = None
         self.parameters = None
         self.results = None
+        self.voltage_monitoring_results = None
 
         self.runner = pypowsybl.rao.create_rao()
 
@@ -76,6 +77,53 @@ class Optimizer:
             self.network.remove_variant(var)
             logger.debug(f"Removed network variant: {var}")
 
+    def run_voltage_monitoring(self):
+        """Run voltage monitoring on the network state produced by the base RAO.
+
+        Voltage CNECs are monitoring-only constraints, so they are evaluated only
+        after the optimizer has selected the remedial actions. Keep the monitoring
+        result separate from ``self.results`` to preserve the existing downstream
+        flow-CNEC result contract.
+        """
+        voltage_cnecs = self.crac.get_voltage_cnecs()
+        if voltage_cnecs.empty:
+            logger.info("No voltage CNECs in CRAC; skipping voltage monitoring")
+            return
+
+        logger.info(f"Running voltage monitoring for {len(voltage_cnecs)} voltage CNECs after RAO")
+        self.voltage_monitoring_results = self.runner.run_voltage_monitoring(
+            crac=self.crac,
+            network=self.network,
+            rao_result=self.results,
+        )
+
+        voltage_results = self.voltage_monitoring_results.get_voltage_cnec_results()
+        if voltage_results.empty:
+            logger.warning("Voltage monitoring completed without voltage CNEC results")
+            return
+
+        for cnec_id, result in voltage_results.iterrows():
+            cnec = voltage_cnecs.loc[cnec_id] if cnec_id in voltage_cnecs.index else {}
+            voltage_level_id = cnec.get("network_element_id", "unknown")
+            voltage_level_name = cnec.get("name")
+            voltage_level = (
+                f"{voltage_level_name} ({voltage_level_id})"
+                if pd.notna(voltage_level_name) else str(voltage_level_id)
+            )
+            tso = cnec.get("operator", "")
+            tso_context = tso if pd.notna(tso) and str(tso).strip() else "unknown"
+            state = result.get("optimized_instant", "unknown")
+            contingency = result.get("contingency")
+            state_context = f"{state}, contingency={contingency}" if pd.notna(contingency) else str(state)
+            min_voltage = result.get("min_voltage")
+            max_voltage = result.get("max_voltage")
+            margin = result.get("margin")
+            logger.info(
+                f"Voltage after RAO for CNEC {cnec_id} at VoltageLevel {voltage_level} "
+                f"[TSO={tso_context}; {state_context}]: "
+                f"min={min_voltage} kV, max={max_voltage} kV, margin={margin} kV"
+            )
+
     def solve_loadflow(self, elastic_server: str = None, settings_keyword: str = "BA_DEFAULT"):
         settings_manager = LoadflowSettingsManager(elastic_server=elastic_server, settings_keyword=settings_keyword)
         result = pypowsybl.loadflow.run_ac(network=self.network,
@@ -91,6 +139,7 @@ class Optimizer:
         self.load_crac()
         logger.info(f"Starting optimization")
         self.results = self.runner.run(crac=self.crac, network=self.network, parameters=self.parameters)
+        self.run_voltage_monitoring()
         self.clean_network_variants()
 
 

@@ -47,7 +47,7 @@ class HandlerVirtualOperator:
         self.crac = None
 
     def get_input_profiles(self):
-        requested_profile_types = ["CO", "AE", "RA", "ER"]  # ER carries the VoltageAngleLimits for angle CNECs
+        requested_profile_types = ["CO", "AE", "RA"]
         received_profiles = self.object_storage.get_input_data_for_timestamp(type_keyword=requested_profile_types,
                                                                              scenario_timestamp=self.scenario_timestamp)
 
@@ -93,7 +93,9 @@ class HandlerVirtualOperator:
         results = results.drop(columns=_cols_to_pop)
 
         # Transform dataframe from wide format to long by results type using melt
-        _cols_to_melt = ["flowCnecResults"] # TODO to update when voltageCNEC and angleCNEC results are printed
+        # Voltage monitoring is logged after RAO and deliberately does not alter
+        # the persisted flow-CNEC result schema.
+        _cols_to_melt = ["flowCnecResults"]
         results = results.melt(id_vars=[col for col in results.columns if col not in _cols_to_melt],
                                value_vars=_cols_to_melt,
                                var_name='cnecResultsType',

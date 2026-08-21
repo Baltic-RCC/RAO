@@ -53,15 +53,14 @@ class FlowCnec(Cnec):
 
 class MonitoringThreshold(BaseModel):
     """
-    Threshold for monitoring-type CNECs (VoltageCnec / AngleCnec).
+    Threshold for VoltageCnecs.
 
     Per OpenRAO JSON CRAC format:
-        - VoltageCnec thresholds are defined in 'kilovolt'
-        - AngleCnec thresholds are defined in 'degree'
-        - these thresholds have no 'side' attribute (unlike FlowCnec thresholds)
+        - thresholds are defined in 'kilovolt'
+        - thresholds have no 'side' attribute (unlike FlowCnec thresholds)
         - a threshold has a minimum and/or a maximum value
     """
-    unit: Literal['kilovolt', 'degree'] = 'kilovolt'
+    unit: Literal['kilovolt'] = 'kilovolt'
     min: Optional[float] = None
     max: Optional[float] = None
 
@@ -98,33 +97,6 @@ class VoltageCnec(BaseModel):
     contingencyId: Optional[str] = None
 
     @field_serializer("networkElementId", when_used='unless-none')
-    def serialize_with_prefix(self, value: str) -> str:
-        return f"_{value}"
-
-
-class AngleCnec(BaseModel):
-    """
-    OpenRAO AngleCnec: monitors the phase angle shift between two ends of a branch.
-
-    Per OpenRAO JSON CRAC format:
-        - contains two network elements: an exporting node and an importing node
-        - thresholds are defined in degrees (min and/or max)
-        - AngleCnecs cannot be optimized by the RAO, they are monitored by the
-          independent (angle) Monitoring module -> optimized=False, monitored=True
-    """
-    id: str
-    name: str
-    description: str = Field(default="", exclude=True)
-    exportingNetworkElementId: str
-    importingNetworkElementId: str
-    operator: str
-    thresholds: List[MonitoringThreshold]
-    instant: Literal["preventive", "outage", "curative"] = "preventive"
-    optimized: bool = False
-    monitored: bool = True
-    contingencyId: Optional[str] = None
-
-    @field_serializer("exportingNetworkElementId", "importingNetworkElementId", when_used='unless-none')
     def serialize_with_prefix(self, value: str) -> str:
         return f"_{value}"
 
@@ -196,11 +168,10 @@ class Crac(BaseModel):
     contingencies: List[Contingency] = Field(default_factory=list)
     flowCnecs: List[FlowCnec] = Field(default_factory=list)
     voltageCnecs: List[VoltageCnec] = Field(default_factory=list)
-    angleCnecs: List[AngleCnec] = Field(default_factory=list)
     networkActions: List[NetworkAction] = Field(default_factory=list)
 
-    @field_serializer("voltageCnecs", "angleCnecs", mode='plain')
-    def serialize_monitoring_cnecs(self, values: List[VoltageCnec | AngleCnec]) -> List[VoltageCnec | AngleCnec]:
+    @field_serializer("voltageCnecs", mode='plain')
+    def serialize_voltage_cnecs(self, values: List[VoltageCnec]) -> List[VoltageCnec]:
         result = []
         for cnec in values:
             # Validate thresholds and filter out invalid ones, if all thresholds are invalid, exclude the CNEC
@@ -244,4 +215,3 @@ if __name__ == "__main__":
         instant="preventive",
         nominalV=[330.0],
     )
-
