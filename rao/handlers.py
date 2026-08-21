@@ -405,7 +405,7 @@ class HandlerVirtualOperator:
             base_element_ids = (results["cnec.networkElementId"].astype(str).str.replace(r'-Leg\d+$', '', regex=True))
 
             # Flag CNECs which were identified as violations from received SAR profile
-            results['cnec.sourceViolation'] = base_element_ids.isisn(violation_ids)
+            results['cnec.sourceViolation'] = base_element_ids.isin(violation_ids)
 
             # Logging status of successful optimization process for contingency
             logger.success(f"Optimization successful for contingency: {mrid}")
