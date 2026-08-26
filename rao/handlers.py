@@ -296,8 +296,14 @@ class HandlerVirtualOperator:
         three_w_trafos = self.network.get_3_windings_transformers()
         # Replace only 3w transformers that are XNEs
         three_w_trafos_to_replace = three_w_trafos.index[ three_w_trafos[ "rated_u1" ] >= 330 ].tolist()
-        pypowsybl.network.replace_3_windings_transformers_with_3_2_windings_transformers(self.network,
-                                                                                         three_w_trafos_to_replace)
+        for tid in three_w_trafos_to_replace:
+            if tid not in self.network.get_3_windings_transformers().index:
+                logger.warning(f"Skipping {tid}: deleted from network [removed eq error not solved]")
+                continue
+            try:
+                pypowsybl.network.replace_3_windings_transformers_with_3_2_windings_transformers(self.network, [tid])
+            except Exception as e:
+                logger.error(f"Failed to replace {tid}: {e}")
         logger.info("[TEMPORARY] Replaced 3w transformers with 3 x 2w transformers in the network")
         two_w_trafos = self.network.get_2_windings_transformers()
         replaced_ids = set(three_w_trafos_to_replace)
@@ -364,6 +370,7 @@ class HandlerVirtualOperator:
             optimizer = Optimizer(network=self.network,
                                   crac_source=crac_object,
                                   parameters_source=optimizer_settings.to_bytesio(),
+                                  loadflow_parameters=lf_settings_manager.build_pypowsybl_parameters(),
                                   debug=self.debug)
             optimizer.run()
             logger.info(f"Optimization finished for contingency: {mrid}")
@@ -392,12 +399,26 @@ class HandlerVirtualOperator:
                     # TODO print out action details
                     logger.info(f"Optimized range action: {optimized_action}")
 
-            # Post-process optimizer results
+            crac_actions = {a['id']: a for a in self.crac.get('networkActions', [])}
+            applied_actions = []
+            for action_result in results.get('networkActionResults', []):
+                action_id = action_result['networkActionId']
+                crac_action = crac_actions.get(action_id, {})
+                for state in action_result.get('activatedStates', [{}]):
+                    for terminal_action in (crac_action.get('terminalsConnectionActions') or [{}]):
+                        applied_actions.append(
+                            f"{crac_action.get('name')} | {action_id} | {state.get('instant')} | "
+                            f"{terminal_action.get('networkElementId')} | {terminal_action.get('actionType')}"
+                        )
             logger.info(f"Post-processing results")
             results = self.post_process_results(results=pd.json_normalize(results))
 
+            # Strip -Leg1/Leg2 from the 2w trafo CNECs that were replaced with the 3w-2w workaround
+            violation_ids = set("_" + data['PowerFlowResult.ACDCTerminal'].astype(str))
+            base_element_ids = (results["cnec.networkElementId"].astype(str).str.replace(r'-Leg\d+$', '', regex=True))
+
             # Flag CNECs which were identified as violations from received SAR profile
-            results['cnec.sourceViolation'] = results['cnec.networkElementId'].isin(data['PowerFlowResult.ACDCTerminal'].apply(lambda x: f"_{x}"))
+            results['cnec.sourceViolation'] = base_element_ids.isin(violation_ids)
 
             # Logging status of successful optimization process for contingency
             logger.success(f"Optimization successful for contingency: {mrid}")
@@ -415,7 +436,51 @@ class HandlerVirtualOperator:
                 index=ELASTIC_RESULTS_INDEX,
                 json_message_list=data_to_send,
             )
+            # Voltage monitoring results to Elastic
+            if optimizer.voltage_monitoring_results is not None:
+                voltage_results = optimizer.voltage_monitoring_results.get_voltage_cnec_results()
+                if not voltage_results.empty:
+                    # thresholds are not part of the monitoring result, take them from the CRAC
+                    cnec_meta = {}
+                    for cnec in self.crac.get('voltageCnecs', []):
+                        threshold = (cnec.get('thresholds') or [{}])[0]
+                        cnec_meta[cnec['id']] = {
+                            'cnec.name': cnec.get('name'),
+                            'cnec.networkElementId': cnec.get('networkElementId'),
+                            'cnec.operator': cnec.get('operator'),
+                            'cnec.instant': cnec.get('instant'),
+                            'cnec.contingencyId': cnec.get('contingencyId'),
+                            'cnec.thresholds.min': threshold.get('min'),
+                            'cnec.thresholds.max': threshold.get('max'),
+                            'cnec.thresholds.unit': threshold.get('unit'),
+                        }
 
+                    voltage_docs = []
+                    for _, row in voltage_results.iterrows():
+                        doc = dict(cnec_meta.get(row.get('cnec_id'), {}))
+                        doc.update({
+                            'cnec.id': row.get('cnec_id'),
+                            'cnecResultsType': 'voltageCnecResults',
+                            'voltage.min': row.get('min_voltage'),
+                            'voltage.max': row.get('max_voltage'),
+                            'voltage.margin': row.get('margin'),
+                            'rmq': properties.headers,
+                            'raoAppliedActions': applied_actions,
+                        })
+                        # Elasticsearch rejects Infinity values
+                        for key in ('voltage.min', 'voltage.max', 'voltage.margin'):
+                            value = doc.get(key)
+                            if value is None or not np.isfinite(value):
+                                doc[key] = None
+                        #if doc['voltage.max'] is None and doc['voltage.min'] is None:
+                           # continue
+                        voltage_docs.append(doc)
+
+                    logger.info(f"Sending {len(voltage_docs)} voltage monitoring results to Elastic")
+                    self.object_storage.elastic_service.send_to_elastic_bulk(
+                        index=ELASTIC_VOLTAGE_RESULTS_INDEX,
+                        json_message_list=voltage_docs,
+                    )
         logger.success(f"Message handling completed successfully")
 
         return message, properties

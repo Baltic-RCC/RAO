@@ -15,12 +15,14 @@ class Optimizer:
                  network: pypowsybl.network.Network,
                  crac_source: str | BytesIO,
                  parameters_source: str | BytesIO | None = None,
+                 loadflow_parameters=None,
                  debug: bool = False,
                  ):
 
         self.network = network
         self.crac_source = crac_source
         self.parameters_source = parameters_source
+        self.loadflow_parameters = loadflow_parameters
         self.debug = debug
 
         self.crac = None
@@ -95,6 +97,8 @@ class Optimizer:
             crac=self.crac,
             network=self.network,
             rao_result=self.results,
+            provider_str="OpenLoadFlow",
+            load_flow_parameters=self.loadflow_parameters,
         )
 
         voltage_results = self.voltage_monitoring_results.get_voltage_cnec_results()
@@ -102,7 +106,8 @@ class Optimizer:
             logger.warning("Voltage monitoring completed without voltage CNEC results")
             return
 
-        for cnec_id, result in voltage_results.iterrows():
+        for _, result in voltage_results.iterrows():
+            cnec_id = result.get("cnec_id")
             cnec = voltage_cnecs.loc[cnec_id] if cnec_id in voltage_cnecs.index else {}
             voltage_level_id = cnec.get("network_element_id", "unknown")
             voltage_level_name = cnec.get("name")

@@ -19,6 +19,7 @@ class CracBuilder:
     # Voltage monitoring scope: all transmission VoltageLevels in the merged model,
     # including PSE VoltageLevels in the Baltic CCR.
     MIN_MONITORED_NOMINAL_VOLTAGE_KV = 330.0
+    EXCLUDED_MODEL_AUTHORS = ()
 
     def __init__(self, data: pd.DataFrame, network: pd.DataFrame | None, workaround: CracWorkaroundContext | None = None):
         logger.info(f"CRAC builder initialized")
@@ -418,6 +419,9 @@ class CracBuilder:
 
         # Compute MW approximation where ActivePowerLimit is NaN and Current/Voltage are available
         if "CurrentLimit.value" in limits.columns and "SvVoltage.v" in limits.columns:
+            limits["CurrentLimit.value"] = pd.to_numeric(limits["CurrentLimit.value"], errors="coerce")
+            limits["SvVoltage.v"] = pd.to_numeric(limits["SvVoltage.v"], errors="coerce")
+
             condition = limits["ActivePowerLimit.value"].isna() & limits["CurrentLimit.value"].notna() & limits["SvVoltage.v"].notna()
             # Calculate MW and assign
             limits.loc[condition, "ActivePowerLimit.value"] = round(
