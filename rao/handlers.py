@@ -27,6 +27,72 @@ parse_app_properties(caller_globals=globals(),
                      eval_types=True)
 
 
+def _elementary_actions(crac_action: dict):
+    """Yield the elementary actions of a CRAC network action as flat dictionaries.
+
+    Each elementary action collection carries a different value field, so the
+    kind is emitted explicitly instead of being inferred from which key is set.
+    """
+    for elementary in (crac_action.get('terminalsConnectionActions') or []):
+        yield {
+            'elementaryType': 'terminalsConnection',
+            'networkElementId': elementary.get('networkElementId'),
+            'actionType': elementary.get('actionType'),
+            'sectionCount': None,
+        }
+    for elementary in (crac_action.get('shuntCompensatorPositionActions') or []):
+        yield {
+            'elementaryType': 'shuntCompensatorPosition',
+            'networkElementId': elementary.get('networkElementId'),
+            'actionType': None,
+            'sectionCount': elementary.get('sectionCount'),
+        }
+
+
+def build_applied_actions(rao_results: dict, crac: dict) -> list[dict]:
+    """Expand optimized network actions into structured Elastic documents.
+
+    Emits one entry per (remedial action, activated state, elementary action)
+    so that every attribute lands in its own Elastic field instead of a single
+    opaque string. Elasticsearch flattens arrays of objects, which drops the
+    pairing between sibling fields, so the correlated tuple is also pre-joined
+    into 'label' to keep it usable in a terms aggregation.
+    """
+    crac_actions = {a['id']: a for a in crac.get('networkActions', [])}
+    applied_actions = []
+
+    for action_result in rao_results.get('networkActionResults', []):
+        action_id = action_result.get('networkActionId')
+        crac_action = crac_actions.get(action_id, {})
+
+        # Keep the remedial action visible even when the CRAC carries no details
+        elementary_actions = list(_elementary_actions(crac_action)) or [{
+            'elementaryType': None,
+            'networkElementId': None,
+            'actionType': None,
+            'sectionCount': None,
+        }]
+
+        for state in (action_result.get('activatedStates') or [{}]):
+            for elementary in elementary_actions:
+                entry = {
+                    'id': action_id,
+                    'name': crac_action.get('name'),
+                    'operator': crac_action.get('operator'),
+                    'instant': state.get('instant'),
+                    'contingencyId': state.get('contingency'),
+                    **elementary,
+                }
+                value = entry['actionType'] if entry['actionType'] is not None else entry['sectionCount']
+                entry['label'] = " | ".join(
+                    str(part) for part in (entry['name'] or action_id, entry['networkElementId'], value)
+                    if part is not None
+                )
+                applied_actions.append(entry)
+
+    return applied_actions
+
+
 class HandlerVirtualOperator:
 
     def __init__(self, current_violations_only: bool = OPTIMIZE_ONLY_CURRENT_VIOLATIONS, debug: bool = DEBUG):
@@ -399,17 +465,7 @@ class HandlerVirtualOperator:
                     # TODO print out action details
                     logger.info(f"Optimized range action: {optimized_action}")
 
-            crac_actions = {a['id']: a for a in self.crac.get('networkActions', [])}
-            applied_actions = []
-            for action_result in results.get('networkActionResults', []):
-                action_id = action_result['networkActionId']
-                crac_action = crac_actions.get(action_id, {})
-                for state in action_result.get('activatedStates', [{}]):
-                    for terminal_action in (crac_action.get('terminalsConnectionActions') or [{}]):
-                        applied_actions.append(
-                            f"{crac_action.get('name')} | {action_id} | {state.get('instant')} | "
-                            f"{terminal_action.get('networkElementId')} | {terminal_action.get('actionType')}"
-                        )
+            applied_actions = build_applied_actions(rao_results=results, crac=self.crac)
             logger.info(f"Post-processing results")
             results = self.post_process_results(results=pd.json_normalize(results))
 
@@ -466,6 +522,7 @@ class HandlerVirtualOperator:
                             'voltage.margin': row.get('margin'),
                             'rmq': properties.headers,
                             'raoAppliedActions': applied_actions,
+                            'raoAppliedActionCount': len(applied_actions),
                         })
                         # Elasticsearch rejects Infinity values
                         for key in ('voltage.min', 'voltage.max', 'voltage.margin'):
