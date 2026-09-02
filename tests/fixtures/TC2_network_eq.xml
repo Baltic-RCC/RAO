@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic EQ (CGMES) network content for testing Voltage/Angle CNEC creation. -->
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:cim="http://iec.ch/TC57/CIM100#"
+         xmlns:entsoe="http://entsoe.eu/CIM/SchemaExtension/3/1#">
+
+    <cim:VoltageLevel rdf:ID="_vl-330">
+        <cim:IdentifiedObject.mRID>vl-330</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>SS-1 330kV</cim:IdentifiedObject.name>
+    </cim:VoltageLevel>
+
+    <cim:BusbarSection rdf:ID="_busbar-1">
+        <cim:IdentifiedObject.mRID>busbar-1</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>BB-1</cim:IdentifiedObject.name>
+        <cim:Equipment.EquipmentContainer rdf:resource="#_vl-330"/>
+    </cim:BusbarSection>
+    <cim:BusbarSection rdf:ID="_busbar-2">
+        <cim:IdentifiedObject.mRID>busbar-2</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>BB-2</cim:IdentifiedObject.name>
+        <cim:Equipment.EquipmentContainer rdf:resource="#_vl-330"/>
+    </cim:BusbarSection>
+
+    <cim:Terminal rdf:ID="_terminal-1">
+        <cim:IdentifiedObject.mRID>terminal-1</cim:IdentifiedObject.mRID>
+        <cim:Terminal.ConductingEquipment rdf:resource="#_busbar-1"/>
+    </cim:Terminal>
+    <cim:Terminal rdf:ID="_terminal-2">
+        <cim:IdentifiedObject.mRID>terminal-2</cim:IdentifiedObject.mRID>
+        <cim:Terminal.ConductingEquipment rdf:resource="#_busbar-2"/>
+    </cim:Terminal>
+
+    <cim:ACLineSegment rdf:ID="_line-1">
+        <cim:IdentifiedObject.mRID>line-1</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>LN-1</cim:IdentifiedObject.name>
+    </cim:ACLineSegment>
+    <cim:ACLineSegment rdf:ID="_line-2">
+        <cim:IdentifiedObject.mRID>line-2</cim:IdentifiedObject.mRID>
+        <cim:IdentifiedObject.name>LN-2</cim:IdentifiedObject.name>
+    </cim:ACLineSegment>
+
+    <!-- Voltage limits on BB-1 -->
+    <cim:OperationalLimitSet rdf:ID="_ols-voltage-1">
+        <cim:IdentifiedObject.mRID>ols-voltage-1</cim:IdentifiedObject.mRID>
+        <cim:OperationalLimitSet.Equipment rdf:resource="#_busbar-1"/>
+    </cim:OperationalLimitSet>
+    <cim:OperationalLimitType rdf:ID="_olt-high-voltage">
+        <cim:IdentifiedObject.mRID>olt-high-voltage</cim:IdentifiedObject.mRID>
+        <cim:OperationalLimitType.isInfiniteDuration>true</cim:OperationalLimitType.isInfiniteDuration>
+        <entsoe:OperationalLimitType.limitType rdf:resource="http://entsoe.eu/CIM/SchemaExtension/3/1#LimitTypeKind.highVoltage"/>
+    </cim:OperationalLimitType>
+    <cim:OperationalLimitType rdf:ID="_olt-low-voltage">
+        <cim:IdentifiedObject.mRID>olt-low-voltage</cim:IdentifiedObject.mRID>
+        <cim:OperationalLimitType.isInfiniteDuration>true</cim:OperationalLimitType.isInfiniteDuration>
+        <entsoe:OperationalLimitType.limitType rdf:resource="http://entsoe.eu/CIM/SchemaExtension/3/1#LimitTypeKind.lowVoltage"/>
+    </cim:OperationalLimitType>
+    <cim:VoltageLimit rdf:ID="_voltage-limit-high">
+        <cim:IdentifiedObject.mRID>voltage-limit-high</cim:IdentifiedObject.mRID>
+        <cim:OperationalLimit.OperationalLimitType rdf:resource="#_olt-high-voltage"/>
+        <cim:OperationalLimit.OperationalLimitSet rdf:resource="#_ols-voltage-1"/>
+        <cim:VoltageLimit.value>362.0</cim:VoltageLimit.value>
+    </cim:VoltageLimit>
+    <cim:VoltageLimit rdf:ID="_voltage-limit-low">
+        <cim:IdentifiedObject.mRID>voltage-limit-low</cim:IdentifiedObject.mRID>
+        <cim:OperationalLimit.OperationalLimitType rdf:resource="#_olt-low-voltage"/>
+        <cim:OperationalLimit.OperationalLimitSet rdf:resource="#_ols-voltage-1"/>
+        <cim:VoltageLimit.value>300.0</cim:VoltageLimit.value>
+    </cim:VoltageLimit>
+</rdf:RDF>

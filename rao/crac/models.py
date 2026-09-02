@@ -51,8 +51,74 @@ class FlowCnec(Cnec):
     pass
 
 
-class VoltageCnec(Cnec):
-    pass
+class MonitoringThreshold(BaseModel):
+    """
+    Threshold for monitoring CNECs.
+
+    Per OpenRAO JSON CRAC format:
+        - VoltageCnec thresholds are defined in 'kilovolt'
+        - AngleCnec thresholds are defined in 'degree'
+        - thresholds have no 'side' attribute (unlike FlowCnec thresholds)
+        - a threshold has a minimum and/or a maximum value
+    """
+    unit: Literal['kilovolt', 'degree'] = 'kilovolt'
+    min: Optional[float] = None
+    max: Optional[float] = None
+
+    @staticmethod
+    def _is_missing(value: float | None) -> bool:
+        return value is not None and isinstance(value, float) and isnan(value)
+
+    def is_valid(self) -> bool:
+        # At least one of min/max must be defined and neither may be NaN
+        if self.min is None and self.max is None:
+            return False
+        return not (self._is_missing(self.min) or self._is_missing(self.max))
+
+
+class VoltageCnec(BaseModel):
+    """
+    OpenRAO VoltageCnec: monitors voltage on a substation.
+
+    Per OpenRAO JSON CRAC format:
+        - contains one network element which must be a VoltageLevel of the network model
+        - thresholds are defined in kilovolts (min and/or max)
+        - VoltageCnecs cannot be optimized by the RAO, they are monitored by the
+          independent (voltage) Monitoring module -> optimized=False, monitored=True
+    """
+    id: str
+    name: str
+    description: str = Field(default="", exclude=True)
+    networkElementId: str
+    operator: str
+    thresholds: List[MonitoringThreshold]
+    instant: Literal["preventive", "outage", "curative"] = "preventive"
+    optimized: bool = False
+    monitored: bool = True
+    contingencyId: Optional[str] = None
+
+    @field_serializer("networkElementId", when_used='unless-none')
+    def serialize_with_prefix(self, value: str) -> str:
+        return f"_{value}"
+
+
+class AngleCnec(BaseModel):
+    """OpenRAO AngleCnec monitoring the angle shift between two network elements."""
+    id: str
+    name: str
+    description: str = Field(default="", exclude=True)
+    exportingNetworkElementId: str
+    importingNetworkElementId: str
+    operator: str
+    thresholds: List[MonitoringThreshold]
+    instant: Literal["preventive", "outage", "curative"] = "preventive"
+    optimized: bool = False
+    monitored: bool = True
+    contingencyId: Optional[str] = None
+
+    @field_serializer("exportingNetworkElementId", "importingNetworkElementId", when_used='unless-none')
+    def serialize_with_prefix(self, value: str) -> str:
+        return f"_{value}"
 
 
 class TerminalsAction(BaseModel):
@@ -122,7 +188,39 @@ class Crac(BaseModel):
     contingencies: List[Contingency] = Field(default_factory=list)
     flowCnecs: List[FlowCnec] = Field(default_factory=list)
     voltageCnecs: List[VoltageCnec] = Field(default_factory=list)
+    # Kept unset unless the opt-in ER VoltageAngleLimit processing is requested.
+    angleCnecs: Optional[List[AngleCnec]] = None
     networkActions: List[NetworkAction] = Field(default_factory=list)
+
+    @field_serializer("voltageCnecs", mode='plain')
+    def serialize_voltage_cnecs(self, values: List[VoltageCnec]) -> List[VoltageCnec]:
+        result = []
+        for cnec in values:
+            # Validate thresholds and filter out invalid ones, if all thresholds are invalid, exclude the CNEC
+            filtered_thresholds = [t for t in cnec.thresholds if t.is_valid()]
+            if not filtered_thresholds:
+                logger.warning(f"Monitoring CNEC excluded due to no valid thresholds: {cnec.name} [{cnec.instant}]")
+                continue
+            cnec.thresholds = filtered_thresholds
+            result.append(cnec)
+
+        return result
+
+    @field_serializer("angleCnecs", mode='plain')
+    def serialize_angle_cnecs(self, values: Optional[List[AngleCnec]]) -> Optional[List[AngleCnec]]:
+        if values is None:
+            return None
+
+        result = []
+        for cnec in values:
+            filtered_thresholds = [threshold for threshold in cnec.thresholds if threshold.is_valid()]
+            if not filtered_thresholds:
+                logger.warning(f"Monitoring CNEC excluded due to no valid thresholds: {cnec.name} [{cnec.instant}]")
+                continue
+            cnec.thresholds = filtered_thresholds
+            result.append(cnec)
+
+        return result
 
     @field_serializer("flowCnecs", mode='plain')
     def serialize_flow_cnecs(self, values: List[FlowCnec]) -> List[FlowCnec]:
@@ -155,4 +253,3 @@ if __name__ == "__main__":
         instant="preventive",
         nominalV=[330.0],
     )
-
