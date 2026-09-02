@@ -10,6 +10,7 @@ import pypowsybl
 import itertools
 import config
 from pathlib import Path
+from typing import Any
 from common.object_storage import ObjectStorage
 from common.config_parser import parse_app_properties
 from common.decorators import performance_counter
@@ -49,14 +50,28 @@ def _elementary_actions(crac_action: dict):
         }
 
 
+def _collapse(values: list) -> Any:
+    """Return a lone distinct value as a scalar, otherwise the sorted distinct list.
+
+    Remedial actions almost always apply one kind of elementary action, so a
+    scalar keeps the Elastic document readable; mixed actions stay complete.
+    """
+    distinct = {value for value in values if value is not None}
+    if not distinct:
+        return None
+    if len(distinct) == 1:
+        return distinct.pop()
+    return sorted(distinct, key=str)
+
+
 def build_applied_actions(rao_results: dict, crac: dict) -> list[dict]:
     """Expand optimized network actions into structured Elastic documents.
 
-    Emits one entry per (remedial action, activated state, elementary action)
-    so that every attribute lands in its own Elastic field instead of a single
-    opaque string. Elasticsearch flattens arrays of objects, which drops the
-    pairing between sibling fields, so the correlated tuple is also pre-joined
-    into 'label' to keep it usable in a terms aggregation.
+    Emits one entry per (remedial action, activated state), with the affected
+    network elements as a list, so each attribute lands in its own Elastic
+    field instead of a single opaque string. Elasticsearch flattens arrays of
+    objects and drops the pairing between sibling fields, so the correlated
+    tuple is also pre-joined into 'label' for terms aggregations.
     """
     crac_actions = {a['id']: a for a in crac.get('networkActions', [])}
     applied_actions = []
@@ -64,33 +79,165 @@ def build_applied_actions(rao_results: dict, crac: dict) -> list[dict]:
     for action_result in rao_results.get('networkActionResults', []):
         action_id = action_result.get('networkActionId')
         crac_action = crac_actions.get(action_id, {})
+        # Stays empty when the CRAC carries no details for the action
+        elementary_actions = list(_elementary_actions(crac_action))
 
-        # Keep the remedial action visible even when the CRAC carries no details
-        elementary_actions = list(_elementary_actions(crac_action)) or [{
-            'elementaryType': None,
-            'networkElementId': None,
-            'actionType': None,
-            'sectionCount': None,
-        }]
+        action_type = _collapse([e['actionType'] for e in elementary_actions])
+        section_count = _collapse([e['sectionCount'] for e in elementary_actions])
 
         for state in (action_result.get('activatedStates') or [{}]):
-            for elementary in elementary_actions:
-                entry = {
-                    'id': action_id,
-                    'name': crac_action.get('name'),
-                    'operator': crac_action.get('operator'),
-                    'instant': state.get('instant'),
-                    'contingencyId': state.get('contingency'),
-                    **elementary,
-                }
-                value = entry['actionType'] if entry['actionType'] is not None else entry['sectionCount']
-                entry['label'] = " | ".join(
-                    str(part) for part in (entry['name'] or action_id, entry['networkElementId'], value)
-                    if part is not None
-                )
-                applied_actions.append(entry)
+            entry = {
+                'id': action_id,
+                'name': crac_action.get('name'),
+                'operator': crac_action.get('operator'),
+                'instant': state.get('instant'),
+                'contingencyId': state.get('contingency'),
+                'elementaryType': _collapse([e['elementaryType'] for e in elementary_actions]),
+                'actionType': action_type,
+                'sectionCount': section_count,
+                'networkElementIds': [e['networkElementId'] for e in elementary_actions
+                                      if e['networkElementId'] is not None],
+            }
+            value = action_type if action_type is not None else section_count
+            entry['label'] = " | ".join(
+                str(part) for part in (entry['name'] or action_id, entry['instant'], value)
+                if part is not None
+            )
+            applied_actions.append(entry)
 
     return applied_actions
+
+
+# Voltage limits are reported as separate documents, matching csa-bus-results
+# where v_mag_percent is relative to the limit in scope rather than to nominal_v.
+VOLTAGE_LIMIT_TYPES = (
+    ('HIGH_VOLTAGE', 'max_voltage', 'high_voltage_limit'),
+    ('LOW_VOLTAGE', 'min_voltage', 'low_voltage_limit'),
+)
+
+
+def _finite(value: Any) -> Any:
+    """Return None for missing or non-finite numbers, which Elasticsearch rejects."""
+    if value is None:
+        return None
+    try:
+        if not np.isfinite(value):
+            return None
+        return float(value)
+    except TypeError:
+        return value
+
+
+def _voltage_level_meta(network) -> dict:
+    """Map voltage level id to its nominal voltage, substation name and country."""
+    meta = {}
+    try:
+        voltage_levels = network.get_voltage_levels()
+        substations = network.get_substations()
+    except Exception as error:
+        logger.warning(f"Could not read voltage level metadata from network: {error}")
+        return meta
+
+    for element_id, voltage_level in voltage_levels.iterrows():
+        substation_id = voltage_level.get('substation_id')
+        substation = substations.loc[substation_id] if substation_id in substations.index else {}
+        meta[str(element_id)] = {
+            'nominal_v': _finite(voltage_level.get('nominal_v')),
+            'substation_name': substation.get('name') or None,
+            'country': substation.get('country') or None,
+        }
+
+    return meta
+
+
+def _lookup_element(meta: dict, element_id: str | None) -> dict:
+    """Resolve a network element, tolerating the CRAC's leading underscore prefix."""
+    if not element_id:
+        return {}
+    return meta.get(element_id) or meta.get(element_id.lstrip('_')) or meta.get(f"_{element_id}") or {}
+
+
+def build_voltage_documents(voltage_results: pd.DataFrame,
+                            crac: dict,
+                            network,
+                            headers: dict,
+                            applied_actions: list[dict]) -> list[dict]:
+    """Build post-RAO voltage documents using the csa-bus-results field naming.
+
+    Emits one document per (voltage CNEC, limit type) so that v_mag_percent is
+    always relative to the limit in scope, the way csa-bus-results reports the
+    N-1 base case. Sharing the field names lets both be charted in one Kibana
+    view, separated by the 'state' field.
+    """
+    element_meta = _voltage_level_meta(network)
+    contingency_names = {c['id']: c.get('name') for c in crac.get('contingencies', [])}
+
+    cnec_meta = {}
+    for cnec in crac.get('voltageCnecs', []):
+        threshold = (cnec.get('thresholds') or [{}])[0]
+        cnec_meta[cnec['id']] = {
+            'subject_id': cnec.get('networkElementId'),
+            'subject_name': cnec.get('name'),
+            'operator': cnec.get('operator'),
+            'instant': cnec.get('instant'),
+            'contingency_id': cnec.get('contingencyId'),
+            'low_voltage_limit': _finite(threshold.get('min')),
+            'high_voltage_limit': _finite(threshold.get('max')),
+            'unit': threshold.get('unit'),
+        }
+
+    metadata = {
+        'run_id': headers.get('run-id'),
+        'source_module': headers.get('source-module'),
+        'trigger': headers.get('trigger'),
+        'project_name': headers.get('project-name'),
+        'content_reference': headers.get('content-reference'),
+        'username': headers.get('username'),
+    }
+
+    documents = []
+    for _, row in voltage_results.iterrows():
+        cnec = cnec_meta.get(row.get('cnec_id'), {})
+        element = _lookup_element(element_meta, cnec.get('subject_id'))
+        contingency_id = cnec.get('contingency_id')
+
+        for limit_type, voltage_column, limit_field in VOLTAGE_LIMIT_TYPES:
+            limit = cnec.get(limit_field)
+            v_mag = _finite(row.get(voltage_column))
+            # Skip the direction when the CRAC defines no threshold for it
+            if limit is None or v_mag is None:
+                continue
+
+            documents.append({
+                'state': 'POST_RAO',
+                'subject_id': cnec.get('subject_id'),
+                'subject_name': cnec.get('subject_name'),
+                'subject_type': 'VOLTAGE_LEVEL',
+                'substation_name': element.get('substation_name'),
+                'country': element.get('country'),
+                'nominal_v': element.get('nominal_v'),
+                'v_mag': v_mag,
+                'v_mag_percent': (v_mag / limit) * 100 if limit else None,
+                'limit_type': limit_type,
+                'high_voltage_limit': cnec.get('high_voltage_limit'),
+                'low_voltage_limit': cnec.get('low_voltage_limit'),
+                'is_violation': bool(v_mag > limit if limit_type == 'HIGH_VOLTAGE' else v_mag < limit),
+                'margin': _finite(row.get('margin')),
+                'unit': cnec.get('unit'),
+                'contingency_id': contingency_id,
+                'contingency_name': contingency_names.get(contingency_id),
+                'instant': cnec.get('instant'),
+                'operator': cnec.get('operator'),
+                'operator_strategy_id': '',
+                'cnec_id': row.get('cnec_id'),
+                'metadata': metadata,
+                '@time_horizon': headers.get('time-horizon'),
+                '@scenario_timestamp': headers.get('scenario-time'),
+                'raoAppliedActions': applied_actions,
+                'raoAppliedActionCount': len(applied_actions),
+            })
+
+    return documents
 
 
 class HandlerVirtualOperator:
@@ -496,42 +643,11 @@ class HandlerVirtualOperator:
             if optimizer.voltage_monitoring_results is not None:
                 voltage_results = optimizer.voltage_monitoring_results.get_voltage_cnec_results()
                 if not voltage_results.empty:
-                    # thresholds are not part of the monitoring result, take them from the CRAC
-                    cnec_meta = {}
-                    for cnec in self.crac.get('voltageCnecs', []):
-                        threshold = (cnec.get('thresholds') or [{}])[0]
-                        cnec_meta[cnec['id']] = {
-                            'cnec.name': cnec.get('name'),
-                            'cnec.networkElementId': cnec.get('networkElementId'),
-                            'cnec.operator': cnec.get('operator'),
-                            'cnec.instant': cnec.get('instant'),
-                            'cnec.contingencyId': cnec.get('contingencyId'),
-                            'cnec.thresholds.min': threshold.get('min'),
-                            'cnec.thresholds.max': threshold.get('max'),
-                            'cnec.thresholds.unit': threshold.get('unit'),
-                        }
-
-                    voltage_docs = []
-                    for _, row in voltage_results.iterrows():
-                        doc = dict(cnec_meta.get(row.get('cnec_id'), {}))
-                        doc.update({
-                            'cnec.id': row.get('cnec_id'),
-                            'cnecResultsType': 'voltageCnecResults',
-                            'voltage.min': row.get('min_voltage'),
-                            'voltage.max': row.get('max_voltage'),
-                            'voltage.margin': row.get('margin'),
-                            'rmq': properties.headers,
-                            'raoAppliedActions': applied_actions,
-                            'raoAppliedActionCount': len(applied_actions),
-                        })
-                        # Elasticsearch rejects Infinity values
-                        for key in ('voltage.min', 'voltage.max', 'voltage.margin'):
-                            value = doc.get(key)
-                            if value is None or not np.isfinite(value):
-                                doc[key] = None
-                        #if doc['voltage.max'] is None and doc['voltage.min'] is None:
-                           # continue
-                        voltage_docs.append(doc)
+                    voltage_docs = build_voltage_documents(voltage_results=voltage_results,
+                                                           crac=self.crac,
+                                                           network=self.network,
+                                                           headers=properties.headers,
+                                                           applied_actions=applied_actions)
 
                     logger.info(f"Sending {len(voltage_docs)} voltage monitoring results to Elastic")
                     self.object_storage.elastic_service.send_to_elastic_bulk(
