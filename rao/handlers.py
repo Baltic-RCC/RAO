@@ -362,7 +362,17 @@ class HandlerVirtualOperator:
                                                          metadata=properties.headers)
 
             # Perform lowImpedanceThreshold parameter workaround
-            self.perform_low_impedance_workaround()
+            # TODO temporary workaround due to SensitivityAnalyis
+            # self.perform_low_impedance_workaround() # old method, not used for the time being and replaced with new method
+
+            # Scan for low impedance gaps in the model (for lines, trafos)
+            from find_low_impedance_gap import find_threshold_gap_branches, zero_out
+            gap, neg_x, _ = find_threshold_gap_branches(self.network, lo=1e-8, hi=3e-5)
+            logger.info(f"LOW-Z {len(gap)} elements in [1e-8 - 3e-5] pu: {gap.groupby('kind').size().to_dict()}")
+            for eid, row in gap.iterrows():
+                logger.info(f"LOW-Z {row.kind} {eid}: r={row.r:.3e} x={row.x:.3e} |z|={row.z_pu:.3e}")
+            # Zero out the resistance and reactance values for problematic grid elements failing lowImpedanceThreshold replacement
+            zero_out(self.network, gap)
 
             # Start the optimization
             optimizer = Optimizer(network=self.network,
@@ -382,7 +392,20 @@ class HandlerVirtualOperator:
             if results['computationStatus'] == 'failure':
                 logger.error(f"Optimizer failed computation: {results}")
                 logger.error(f"Enable pypowsybl logs for more information")
-                continue
+                logger.warning("Attempting to relax RAO parameters and re-optimize")
+
+                rao_params_relaxed = json.load(optimizer_settings.to_bytesio())
+                rao_params_relaxed["extensions"]["open-rao-search-tree-parameters"]["load-flow-and-sensitivity-computation"]["sensitivity-parameters"]["load-flow-parameters"]["useReactiveLimits"] = False
+
+                if hasattr(crac_object, "seek"):
+                    crac_object.seek(0)
+                optimizer = Optimizer(network=self.network,
+                                      crac_source=crac_object,
+                                      parameters_source=BytesIO(json.dumps(rao_params_relaxed).encode('utf-8')),
+                                      debug=self.debug)
+                optimizer.run()
+                results = optimizer.results.to_json() if optimizer.results else None
+
 
             # Check if there are any optimized remedial actions
             if not results['networkActionResults'] and not results['rangeActionResults']:
@@ -440,9 +463,9 @@ if __name__ == '__main__':
         "sender": "TSOX",
         "senderApplication": "APPX",
         "service": "INPUT-DATA",
-        "scenario-time": datetime(2026, 4, 26, 18, 30),
+        "scenario-time": datetime(2026, 9, 23, 22, 30),
         "time-horizon": "ID",
-        "content-reference": "EMFOS/RMM/ID/RMM_12_002_20260417T1730Z_BA_547bf8be-49a1-4eb1-a1f4-2ea10c841722.zip",
+        "content-reference": "EMFOS/RMM/ID/RMM_15_002_20260923T2030Z_BA_44a93f61-0158-483d-8cfc-dfe8959099ec.zip",
     }
     properties = BasicProperties(
         content_type='application/octet-stream',
@@ -452,7 +475,7 @@ if __name__ == '__main__':
         timestamp=1747208205,
         headers=headers,
     )
-    with open(r"C:\Users\lukas.navickas\Documents\test_data_rao\test_litgrid_prod_model\SAR_20260504T1430_ID_1_637ec819-3e81-426b-bd67-a6fa813662c3.xml", "rb") as file:
+    with open(r"C:\Users\lukas.navickas\Documents\test_data_rao\SAR_20260923T2230_ID.xml", "rb") as file:
         file_bytes = file.read()
 
     # Create instance

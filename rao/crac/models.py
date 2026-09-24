@@ -108,7 +108,7 @@ class Crac(BaseModel):
         populate_by_name = True
 
     type: str = "CRAC"
-    version: str = "2.7"
+    version: str = "2.11"
     info: str = "TC1 CRAC Example"
     id: str = "LS_unsecure"
     name: str = "LS_unsecure"
@@ -118,7 +118,7 @@ class Crac(BaseModel):
         {"id": "curative", "kind": "CURATIVE"}
     ])
     ra_usage_limits_per_instant: List[Any] = Field(default_factory=list)
-    networkElementsNamePerId: Dict = Field(default_factory=dict)
+    # networkElementsNamePerId: Dict = Field(default_factory=dict) #Not needed anymore in pypowsybl==1.16.1
     contingencies: List[Contingency] = Field(default_factory=list)
     flowCnecs: List[FlowCnec] = Field(default_factory=list)
     voltageCnecs: List[VoltageCnec] = Field(default_factory=list)

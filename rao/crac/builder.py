@@ -724,7 +724,7 @@ class CracBuilder:
                 operator=data['RemedialAction.RemedialActionSystemOperator'].iloc[0],
                 onInstantUsageRules=[
                     {
-                        "usageMethod": "available",
+                        # "usageMethod": "available", # Not supported in CRAC version 2.11
                         "instant": data["RemedialAction.kind"].iloc[0].split(".")[-1]
                     }
                 ],
