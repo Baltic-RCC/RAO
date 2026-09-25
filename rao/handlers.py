@@ -587,7 +587,7 @@ class HandlerVirtualOperator:
             # self.perform_low_impedance_workaround() # old method, not used for the time being and replaced with new method
 
             # Scan for low impedance gaps in the model (for lines, trafos)
-            from find_low_impedance_gap import find_threshold_gap_branches, zero_out
+            from rao.find_low_impedance_gap import find_threshold_gap_branches, zero_out
             gap, neg_x, _ = find_threshold_gap_branches(self.network, lo=1e-8, hi=3e-5)
             logger.info(f"LOW-Z {len(gap)} elements in [1e-8 - 3e-5] pu: {gap.groupby('kind').size().to_dict()}")
             for eid, row in gap.iterrows():

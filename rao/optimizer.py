@@ -151,7 +151,12 @@ class Optimizer:
         self.load_crac()
         logger.info(f"Starting optimization")
         self.results = self.runner.run(crac=self.crac, network=self.network, parameters=self.parameters)
-        self.run_voltage_monitoring()
+        # A failed RAO leaves nothing to monitor, and pypowsybl raises rather than
+        # returning empty - which would stop the handler before its relaxation retry.
+        try:
+            self.run_voltage_monitoring()
+        except Exception as error:
+            logger.warning(f"Voltage monitoring skipped: {error}")
         self.clean_network_variants()
 
 
