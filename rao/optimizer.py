@@ -87,6 +87,13 @@ class Optimizer:
         result separate from ``self.results`` to preserve the existing downstream
         flow-CNEC result contract.
         """
+        # Monitoring reads the optimized network state, so a failed RAO has nothing
+        # to offer it - pypowsybl raises rather than returning an empty result.
+        status = getattr(self.results, 'status', None)
+        if status == pypowsybl._pypowsybl.RaoComputationStatus.FAILURE:
+            logger.warning(f"RAO computation status is {status}; skipping voltage monitoring")
+            return
+
         voltage_cnecs = self.crac.get_voltage_cnecs()
         if voltage_cnecs.empty:
             logger.info("No voltage CNECs in CRAC; skipping voltage monitoring")

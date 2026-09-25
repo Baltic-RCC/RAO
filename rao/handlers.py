@@ -273,19 +273,25 @@ class HandlerVirtualOperator:
 
         # Validate received profiles
         df = pd.DataFrame(received_profiles)
-        expected = set(itertools.product(set(requested_profile_types), set(self.network_model_meta['included'])))
-        received = set(zip(df['keyword'], df['entity']))
-        missing = expected - received
+        if 'entity' in df.columns:
+            expected = set(itertools.product(set(requested_profile_types), set(self.network_model_meta['included'])))
+            received = set(zip(df['keyword'], df['entity']))
+            missing = expected - received
 
-        # Apply fallback
-        for element in missing:
-            logger.warning(f"[FALLBACK] Requesting latest available input data for: {element}")
-            fallback_profile = self.object_storage.get_latest_available_input_data(
-                type_keyword=[element[0]],
-                scenario_timestamp=self.scenario_timestamp,
-                entity=[element[1]],
-            )
-            received_profiles.extend(fallback_profile)
+            # Apply fallback
+            for element in missing:
+                logger.warning(f"[FALLBACK] Requesting latest available input data for: {element}")
+                fallback_profile = self.object_storage.get_latest_available_input_data(
+                    type_keyword=[element[0]],
+                    scenario_timestamp=self.scenario_timestamp,
+                    entity=[element[1]],
+                )
+                received_profiles.extend(fallback_profile)
+        else:
+            # Completeness is defined per TSO, so it cannot be established without
+            # the entity. Proceed with whatever the object storage returned.
+            logger.warning(f"Input profiles carry no entity, skipping per-TSO completeness check. "
+                           f"Received profile types: {sorted(set(df['keyword']))}")
 
         return [profile['content'] for profile in received_profiles]
 
@@ -650,9 +656,14 @@ class HandlerVirtualOperator:
                                                            applied_actions=applied_actions)
 
                     logger.info(f"Sending {len(voltage_docs)} voltage monitoring results to Elastic")
+                    # Derive the document id so re-running a scenario overwrites its
+                    # results instead of adding a second copy of every document.
                     self.object_storage.elastic_service.send_to_elastic_bulk(
                         index=ELASTIC_VOLTAGE_RESULTS_INDEX,
                         json_message_list=voltage_docs,
+                        id_from_metadata=True,
+                        id_metadata_list=['@scenario_timestamp', 'cnec_id', 'limit_type'],
+                        hashing=True,
                     )
         logger.success(f"Message handling completed successfully")
 
