@@ -15,6 +15,12 @@ class CracBuilder:
     This class is a placeholder and can be extended with specific pre-processing methods.
     """
 
+    # TODO move to config.properties once the monitoring scope is agreed
+    # Voltage monitoring scope: all transmission VoltageLevels in the merged model,
+    # including PSE VoltageLevels in the Baltic CCR.
+    MIN_MONITORED_NOMINAL_VOLTAGE_KV = 330.0
+    EXCLUDED_MODEL_AUTHORS = ()
+
     def __init__(self, data: pd.DataFrame, network: pd.DataFrame | None, workaround: CracWorkaroundContext | None = None):
         logger.info(f"CRAC builder initialized")
         self.data = data
@@ -22,6 +28,14 @@ class CracBuilder:
         self.limits = None
         self._crac = None
         self.workaround = workaround or CracWorkaroundContext()
+
+        # BaseVoltage nominal voltages live in the EQ boundary file, capture them before it is excluded
+        self.base_voltages = {}
+        try:
+            self.base_voltages = self.network.type_tableview(
+                "BaseVoltage", string_to_number=True)["BaseVoltage.nominalVoltage"].to_dict()
+        except Exception:
+            logger.warning("BaseVoltage nominal voltages not available in network model")
 
         # TODO [TEMPORARY] exclude boundary set
         boundary_files = self.network[(self.network.KEY == 'label') & (self.network.VALUE.str.contains("ENTSOE"))]
@@ -361,19 +375,26 @@ class CracBuilder:
         limits = limits.merge(self.network.type_tableview("OperationalLimitType", string_to_number=False).reset_index(),
                               right_on="ID", left_on="OperationalLimit.OperationalLimitType")
 
-        # Add link to equipment via Terminals
-        limits = limits.merge(self.network.type_tableview('Terminal', string_to_number=False).reset_index(),
-                              left_on="OperationalLimitSet.Terminal", right_on="ID", suffixes=("", "_Terminal"))
-
-        limits["ID_Equipment"] = None
-
-        # Get Equipment via terminal -> 'OperationalLimitSet.Terminal' -> 'Terminal.ConductingEquipment'
-        if 'Terminal.ConductingEquipment' in limits.columns:
-            limits["ID_Equipment"] = limits["ID_Equipment"].fillna(limits["Terminal.ConductingEquipment"])
-
-        # Get Equipment directly -> 'OperationalLimitSet.Equipment'
+        # Resolve the constrained equipment. Flow limits generally refer to a terminal,
+        # whereas VoltageLimits refer directly to a BusBarSection through
+        # OperationalLimitSet.Equipment. Keep both forms: an inner join here would
+        # otherwise discard every direct-equipment VoltageLimit.
+        limits["ID_Equipment"] = pd.Series(pd.NA, index=limits.index, dtype="object")
         if 'OperationalLimitSet.Equipment' in limits.columns:
             limits["ID_Equipment"] = limits["ID_Equipment"].fillna(limits['OperationalLimitSet.Equipment'])
+
+        terminals = self.network.type_tableview('Terminal', string_to_number=False)
+        terminals = terminals.reset_index() if terminals is not None else pd.DataFrame()
+        if 'OperationalLimitSet.Terminal' in limits.columns and 'ID' in terminals.columns:
+            limits = limits.merge(
+                terminals,
+                how="left",
+                left_on="OperationalLimitSet.Terminal",
+                right_on="ID",
+                suffixes=("", "_Terminal"),
+            )
+            if 'Terminal.ConductingEquipment' in limits.columns:
+                limits["ID_Equipment"] = limits["ID_Equipment"].fillna(limits["Terminal.ConductingEquipment"])
 
         # Add equipment type
         # limits = limits.merge(data.query("KEY == 'Type'"), left_on="ID_Equipment", right_on="ID", suffixes=("", "_Type"))
@@ -382,12 +403,25 @@ class CracBuilder:
         if "ActivePowerLimit.value" not in limits.columns:
             limits["ActivePowerLimit.value"] = pd.NA
 
-        # Get voltages on terminals to convert A limits to MW
-        limits = limits.merge(self.network.type_tableview("SvVoltage"), left_on="Terminal.TopologicalNode",
-                              right_on="SvVoltage.TopologicalNode", suffixes=("", "_SvVoltage"))
+        # Get voltages on terminals to convert A limits to MW. VoltageLimits have no
+        # terminal and do not require this enrichment, so retain those rows.
+        sv_voltages = self.network.type_tableview("SvVoltage", string_to_number=False)
+        sv_voltages = sv_voltages.reset_index() if sv_voltages is not None else pd.DataFrame()
+        if ('Terminal.TopologicalNode' in limits.columns
+                and 'SvVoltage.TopologicalNode' in sv_voltages.columns):
+            limits = limits.merge(
+                sv_voltages,
+                how="left",
+                left_on="Terminal.TopologicalNode",
+                right_on="SvVoltage.TopologicalNode",
+                suffixes=("", "_SvVoltage"),
+            )
 
         # Compute MW approximation where ActivePowerLimit is NaN and Current/Voltage are available
         if "CurrentLimit.value" in limits.columns and "SvVoltage.v" in limits.columns:
+            limits["CurrentLimit.value"] = pd.to_numeric(limits["CurrentLimit.value"], errors="coerce")
+            limits["SvVoltage.v"] = pd.to_numeric(limits["SvVoltage.v"], errors="coerce")
+
             condition = limits["ActivePowerLimit.value"].isna() & limits["CurrentLimit.value"].notna() & limits["SvVoltage.v"].notna()
             # Calculate MW and assign
             limits.loc[condition, "ActivePowerLimit.value"] = round(
@@ -573,6 +607,12 @@ class CracBuilder:
 
         assessed_elements = self.data.type_tableview("AssessedElement", string_to_number=False)
 
+        # Flow CNECs must reference ConductingEquipment. Voltage and angle CNECs
+        # are not built from the AE profile.
+        if 'AssessedElement.ConductingEquipment' not in assessed_elements.columns:
+            assessed_elements['AssessedElement.ConductingEquipment'] = pd.NA
+        assessed_elements = assessed_elements.dropna(subset=['AssessedElement.ConductingEquipment'])
+
         # TODO [TEMPORARY] - perform consistency check
         missing = assessed_elements[~assessed_elements['AssessedElement.ConductingEquipment'].isin(self.network.ID)]
         for _, row in missing.iterrows():
@@ -637,6 +677,355 @@ class CracBuilder:
                 )
                 self._crac.flowCnecs.append(cnec_curative)
                 logger.debug(f"Added CNEC {ae['IdentifiedObject.name']} for curative state on contingency: {contingency.name}")
+
+    """Dormant ER VoltageAngleLimit -> AngleCnec support."""
+    def _get_object_attributes(self, object_id: str | None) -> dict:
+        """Collect an object's attributes from the NC and EQ triplet stores."""
+        if not object_id:
+            return {}
+
+        attributes = {}
+        for store in (self.data, self.network):
+            if store is None:
+                continue
+            rows = store[store.ID == object_id]
+            for key, value in zip(rows.KEY, rows.VALUE):
+                attributes.setdefault(key, value)
+        return attributes
+
+    def _resolve_terminal_equipment(self, terminal_id: str | None) -> str | None:
+        """Resolve a Terminal reference to its ConductingEquipment."""
+        return self._get_object_attributes(terminal_id).get("Terminal.ConductingEquipment")
+
+    def _append_angle_cnec(self, cnec: models.AngleCnec, in_base_case: bool) -> None:
+        """Append preventive and contingency-specific copies of an angle CNEC."""
+        if self._crac.angleCnecs is None:
+            self._crac.angleCnecs = []
+
+        if in_base_case:
+            self._crac.angleCnecs.append(cnec.model_copy(update={
+                "instant": "preventive",
+                "id": f"{cnec.id}-preventive",
+            }))
+        else:
+            logger.warning(f"AngleCnec excluded from preventive state because inBaseCase is false: {cnec.name}")
+
+        for contingency in self._crac.contingencies:
+            self._crac.angleCnecs.append(cnec.model_copy(update={
+                "contingencyId": contingency.id,
+                "instant": "curative",
+                "id": f"{cnec.id}-curative",
+            }))
+
+    def _create_angle_cnec(self, assessed_element: dict, limit_attributes: dict) -> None:
+        """Create an AngleCnec from one ER VoltageAngleLimit."""
+        name = assessed_element["IdentifiedObject.name"]
+        limit_type = self._get_object_attributes(
+            limit_attributes.get("OperationalLimit.OperationalLimitType")
+        )
+        limit_set = self._get_object_attributes(
+            limit_attributes.get("OperationalLimit.OperationalLimitSet")
+        )
+
+        try:
+            value = float(limit_attributes.get("VoltageAngleLimit.normalValue"))
+        except (TypeError, ValueError):
+            logger.warning(f"AngleCnec excluded due to missing or invalid VoltageAngleLimit normalValue: {name}")
+            return
+        if value < 0:
+            logger.warning(f"AngleCnec excluded because VoltageAngleLimit normalValue is negative: {name}")
+            return
+
+        direction = str(limit_type.get("OperationalLimitType.direction", ""))
+        flow_to_reference = limit_attributes.get("VoltageAngleLimit.isFlowToRefTerminal")
+        if direction.endswith("absoluteValue"):
+            threshold = models.MonitoringThreshold(unit="degree", min=-value, max=value)
+        elif direction.endswith(".high"):
+            threshold = models.MonitoringThreshold(unit="degree", max=value)
+        elif direction.endswith(".low"):
+            threshold = models.MonitoringThreshold(unit="degree", min=-value)
+        else:
+            logger.warning(f"AngleCnec excluded due to unsupported OperationalLimitType direction '{direction}': {name}")
+            return
+        if not direction.endswith("absoluteValue") and flow_to_reference is None:
+            logger.warning(f"AngleCnec excluded because isFlowToRefTerminal is missing: {name}")
+            return
+
+        reference_element = self._resolve_terminal_equipment(
+            limit_attributes.get("VoltageAngleLimit.AngleReferenceTerminal")
+        )
+        limited_element = self._resolve_terminal_equipment(
+            limit_set.get("OperationalLimitSet.Terminal")
+        )
+        if not reference_element or not limited_element:
+            logger.warning(f"AngleCnec excluded because its terminal equipment could not be resolved: {name}")
+            return
+
+        if str(flow_to_reference).lower() == "true":
+            exporting_element, importing_element = reference_element, limited_element
+        else:
+            exporting_element, importing_element = limited_element, reference_element
+
+        cnec = models.AngleCnec(
+            id=str(assessed_element["IdentifiedObject.mRID"]),
+            name=name,
+            description=assessed_element.get("IdentifiedObject.description") or "",
+            exportingNetworkElementId=exporting_element,
+            importingNetworkElementId=importing_element,
+            operator=assessed_element.get("AssessedElement.AssessedSystemOperator") or "",
+            thresholds=[threshold],
+        )
+        in_base_case = str(assessed_element.get("AssessedElement.inBaseCase", "false")).lower() == "true"
+        self._append_angle_cnec(cnec, in_base_case)
+
+    def process_angle_cnecs_from_data(self) -> None:
+        """Create AngleCnecs from ER VoltageAngleLimits when explicitly requested.
+
+        This method is intentionally not called by :meth:`build_crac`. It is retained
+        for the future ER-profile angle-monitoring workflow.
+        """
+        try:
+            angle_limits = self.data.type_tableview("VoltageAngleLimit", string_to_number=False)
+        except Exception:
+            angle_limits = None
+
+        if angle_limits is None or angle_limits.empty:
+            logger.info("No ER VoltageAngleLimits found, skipping angle CNEC creation")
+            return
+
+        created_before = len(self._crac.angleCnecs or [])
+        existing = {
+            str(cnec.id).rsplit("-", 1)[0]
+            for cnec in self._crac.angleCnecs or []
+        }
+        for limit_id, row in angle_limits.iterrows():
+            limit_attributes = row.to_dict()
+            mrid = limit_attributes.get("IdentifiedObject.mRID") or limit_id
+            if str(mrid) in existing:
+                logger.debug(f"AngleCnec already exists for VoltageAngleLimit: {mrid}")
+                continue
+
+            self._create_angle_cnec({
+                "IdentifiedObject.mRID": mrid,
+                "IdentifiedObject.name": limit_attributes.get("IdentifiedObject.name") or str(mrid),
+                "IdentifiedObject.description": limit_attributes.get("IdentifiedObject.description") or "",
+                "AssessedElement.inBaseCase": "true",
+            }, limit_attributes)
+
+        logger.info(
+            f"Created {len(self._crac.angleCnecs or []) - created_before} angle CNECs from ER VoltageAngleLimits"
+        )
+
+    """
+    Voltage CNECs derived directly from the network model (EQ profile)
+    """
+    def _build_voltage_level_map(self) -> dict[str, str]:
+        """Build an equipment -> containing VoltageLevel map in a single pass.
+
+        Resolving several hundred BusBarSections one by one is prohibitively slow,
+        so the containment hierarchy is collected once and traversed in memory.
+        """
+        if self.network is None:
+            return {}
+
+        def _table(object_type: str):
+            try:
+                table = self.network.type_tableview(object_type, string_to_number=False)
+            except Exception:
+                return None
+            if table is None or getattr(table, "empty", True):
+                return None
+            return table
+
+        voltage_levels_table = _table("VoltageLevel")
+        voltage_levels = set(voltage_levels_table.index) if voltage_levels_table is not None else set()
+
+        # Collect containment references: BusBarSection -> (Bay) -> VoltageLevel
+        containers: dict[str, str] = {}
+        for object_type in ("BusbarSection", "Bay"):
+            table = _table(object_type)
+            if table is None:
+                continue
+            for column in ("Equipment.EquipmentContainer", "Bay.VoltageLevel"):
+                if column in table.columns:
+                    containers.update(table[column].dropna().to_dict())
+
+        resolved: dict[str, str] = {}
+        for element_id in containers:
+            current = element_id
+            for _ in range(3):
+                if current in voltage_levels:
+                    resolved[element_id] = current
+                    break
+                current = containers.get(current)
+                if current is None:
+                    break
+
+        return resolved
+
+    def _build_voltage_level_tso_map(self) -> dict[str, str]:
+        """Map a VoltageLevel to the modeling authority of its source EQ profile.
+
+        CGMES carries the TSO responsible for a model in the FullModel header as
+        ``Model.modelingAuthoritySet``. Every triplet retains the source profile's
+        ``INSTANCE_ID``; this lets us use that authority without inferring TSO
+        ownership from an equipment name or geography.
+        """
+        if self.network is None:
+            return {}
+
+        authorities = self.network.loc[
+            self.network["KEY"].eq("Model.modelingAuthoritySet"),
+            ["INSTANCE_ID", "VALUE"],
+        ].dropna(subset=["VALUE"])
+        if authorities.empty:
+            logger.info("No CGMES modeling-authority header found; voltage CNEC TSO will be unknown")
+            return {}
+
+        authority_by_instance = (
+            authorities.drop_duplicates(subset="INSTANCE_ID", keep="first")
+            .set_index("INSTANCE_ID")["VALUE"]
+            .to_dict()
+        )
+        voltage_level_instances = self.network.loc[
+            self.network["KEY"].eq("Type") & self.network["VALUE"].eq("VoltageLevel"),
+            ["ID", "INSTANCE_ID"],
+        ]
+        return voltage_level_instances.assign(
+            operator=voltage_level_instances["INSTANCE_ID"].map(authority_by_instance)
+        ).dropna(subset=["operator"]).drop_duplicates(subset="ID", keep="first").set_index("ID")["operator"].to_dict()
+
+    def process_voltage_cnecs_from_network(self):
+        """Create VoltageCnecs from the VoltageLimits defined in the network model (EQ profile).
+
+        Voltage CNECs are derived directly from EQ VoltageLimits; the AE profile is not used.
+
+        Monitoring scope:
+            - all TSOs in the merged model, including PSE
+            - transmission voltage levels only (nominal voltage >= MIN_MONITORED_NOMINAL_VOLTAGE_KV)
+
+        Thresholds are permanent high- and low-voltage limits. Temporary limits are intentionally not used.
+
+        Voltage CNECs are only monitored (never optimised), so they are created for the curative
+        instant alone - the state after a contingency, where voltage deviations actually occur.
+        """
+        if self.network is None:
+            logger.warning("Network model is not available, skipping voltage CNEC creation")
+            return
+
+        try:
+            voltage_limits = self.network.type_tableview("VoltageLimit", string_to_number=False)
+        except Exception:
+            voltage_limits = None
+
+        if voltage_limits is None or voltage_limits.empty or "VoltageLimit.value" not in voltage_limits.columns:
+            logger.info("No VoltageLimits found in network model, skipping voltage CNEC creation")
+            return
+
+        if not self._crac.contingencies:
+            logger.warning("No contingencies defined, skipping voltage CNEC creation (curative instant only)")
+            return
+
+        # Resolve each voltage limit independently from the FlowCNEC limit table.
+        # That table requires Terminal/SvVoltage joins which are not present for
+        # OperationalLimitSet.Equipment-based voltage limits.
+        try:
+            limit_sets = self.network.type_tableview("OperationalLimitSet", string_to_number=False)
+            limit_types = self.network.type_tableview("OperationalLimitType", string_to_number=False)
+            terminals = self.network.type_tableview("Terminal", string_to_number=False)
+        except Exception as error:
+            logger.warning(f"Unable to retrieve voltage-limit references from network model: {error}")
+            return
+
+        if "OperationalLimit.OperationalLimitSet" not in voltage_limits.columns:
+            logger.warning("VoltageLimits have no OperationalLimitSet reference, skipping voltage CNEC creation")
+            return
+
+        equipment_by_limit_set = {}
+        if "OperationalLimitSet.Equipment" in limit_sets.columns:
+            equipment_by_limit_set.update(limit_sets["OperationalLimitSet.Equipment"].dropna().to_dict())
+        if ("OperationalLimitSet.Terminal" in limit_sets.columns
+                and "Terminal.ConductingEquipment" in terminals.columns):
+            terminal_equipment = terminals["Terminal.ConductingEquipment"].dropna().to_dict()
+            for limit_set_id, terminal_id in limit_sets["OperationalLimitSet.Terminal"].dropna().items():
+                equipment_by_limit_set.setdefault(limit_set_id, terminal_equipment.get(terminal_id))
+
+        limit_kind_by_type = (limit_types["OperationalLimitType.limitType"].fillna("").astype(str).to_dict()
+                              if "OperationalLimitType.limitType" in limit_types.columns else {})
+        infinite_duration_by_type = (limit_types["OperationalLimitType.isInfiniteDuration"].to_dict()
+                                     if "OperationalLimitType.isInfiniteDuration" in limit_types.columns else {})
+
+        equipment = voltage_limits["OperationalLimit.OperationalLimitSet"].map(equipment_by_limit_set)
+        limit_type = (voltage_limits["OperationalLimit.OperationalLimitType"]
+                      if "OperationalLimit.OperationalLimitType" in voltage_limits.columns
+                      else pd.Series(pd.NA, index=voltage_limits.index, dtype="object"))
+        limit_kind = limit_type.map(limit_kind_by_type).fillna("").astype(str)
+        is_permanent = limit_type.map(infinite_duration_by_type).fillna("true").astype(str).str.lower() != "false"
+        value = pd.to_numeric(voltage_limits["VoltageLimit.value"], errors="coerce")
+
+        # Several busbars can belong to the same VoltageLevel, group the limits accordingly.
+        voltage_level_map = self._build_voltage_level_map()
+        tso_by_voltage_level = self._build_voltage_level_tso_map()
+        voltage_level = equipment.map(voltage_level_map)
+
+        def _aggregate(mask, how: str) -> dict:
+            selection = mask & value.gt(0) & voltage_level.notna()
+            if not selection.any():
+                return {}
+            return value[selection].groupby(voltage_level[selection]).agg(how).to_dict()
+
+        # Permanent limits only, strictest value per voltage level.
+        high = _aggregate(limit_kind.str.endswith("highVoltage") & is_permanent, "min")
+        low = _aggregate(limit_kind.str.endswith("lowVoltage") & is_permanent, "max")
+
+        unresolved = int((value.notna() & equipment.notna() & voltage_level.isna()).sum())
+        if unresolved:
+            logger.debug(f"{unresolved} VoltageLimits skipped, containing VoltageLevel could not be resolved")
+
+        # Nominal voltage per VoltageLevel, used to keep only the transmission levels
+        nominal_voltages = {}
+        names = {}
+        try:
+            voltage_levels = self.network.type_tableview("VoltageLevel", string_to_number=False)
+            if "VoltageLevel.BaseVoltage" in voltage_levels.columns:
+                nominal_voltages = voltage_levels["VoltageLevel.BaseVoltage"].map(self.base_voltages).dropna().to_dict()
+            if "IdentifiedObject.name" in voltage_levels.columns:
+                names = voltage_levels["IdentifiedObject.name"].to_dict()
+        except Exception:
+            pass
+        if not nominal_voltages:
+            logger.warning("Nominal voltages unavailable, voltage level threshold filter is not applied")
+
+        created = 0
+        skipped_below_threshold = 0
+
+        for element_id in sorted(set(high) | set(low)):
+            nominal = nominal_voltages.get(element_id)
+            if nominal is not None and float(nominal) < self.MIN_MONITORED_NOMINAL_VOLTAGE_KV:
+                skipped_below_threshold += 1
+                continue
+
+            name = names.get(element_id) or element_id
+            thresholds = [models.MonitoringThreshold(unit="kilovolt", max=high.get(element_id), min=low.get(element_id))]
+            operator = tso_by_voltage_level.get(element_id, "")
+
+            for contingency in self._crac.contingencies:
+                self._crac.voltageCnecs.append(models.VoltageCnec(
+                    id=f"{element_id}-voltage-curative-{contingency.id}",
+                    name=f"{name} voltage",
+                    description="",
+                    networkElementId=element_id,
+                    operator=operator,
+                    thresholds=thresholds,
+                    instant="curative",
+                    contingencyId=contingency.id,
+                ))
+                created += 1
+                logger.debug(f"Added VoltageCnec {name} for curative state on contingency: {contingency.name}")
+
+        if skipped_below_threshold:
+            logger.info(f"{skipped_below_threshold} voltage levels skipped, nominal voltage below {self.MIN_MONITORED_NOMINAL_VOLTAGE_KV} kV")
+        logger.info(f"Created {created} voltage CNECs from network model VoltageLimits")
 
     def process_remedial_actions(self):
         """
@@ -886,6 +1275,9 @@ class CracBuilder:
             logger.info("[WORKAROUND] Applying 3w transformer replacement workaround to contingencies")
             self.contingencies_3w_workaround()
         self.process_cnecs()
+        self.process_voltage_cnecs_from_network()
+        # Angle CNECs are opt-in. Keep process_angle_cnecs_from_data() dormant until
+        # the ER-profile angle-monitoring workflow is enabled.
 
         if self.workaround:
             logger.info("[WORKAROUND] Applying 3w transformer replacement workaround to FlowCNECs")
