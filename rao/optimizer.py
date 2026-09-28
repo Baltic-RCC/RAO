@@ -113,6 +113,8 @@ class Optimizer:
             logger.warning("Voltage monitoring completed without voltage CNEC results")
             return
 
+        # One line per CNEC is far too noisy at INFO - the same numbers go to Elastic.
+        # Kept at DEBUG for when the results need checking without opening Kibana.
         for _, result in voltage_results.iterrows():
             cnec_id = result.get("cnec_id")
             cnec = voltage_cnecs.loc[cnec_id] if cnec_id in voltage_cnecs.index else {}
@@ -127,13 +129,11 @@ class Optimizer:
             state = result.get("optimized_instant", "unknown")
             contingency = result.get("contingency")
             state_context = f"{state}, contingency={contingency}" if pd.notna(contingency) else str(state)
-            min_voltage = result.get("min_voltage")
-            max_voltage = result.get("max_voltage")
-            margin = result.get("margin")
-            logger.info(
+            logger.debug(
                 f"Voltage after RAO for CNEC {cnec_id} at VoltageLevel {voltage_level} "
                 f"[TSO={tso_context}; {state_context}]: "
-                f"min={min_voltage} kV, max={max_voltage} kV, margin={margin} kV"
+                f"min={result.get('min_voltage')} kV, max={result.get('max_voltage')} kV, "
+                f"margin={result.get('margin')} kV"
             )
 
     def solve_loadflow(self, elastic_server: str = None, settings_keyword: str = "BA_DEFAULT"):
