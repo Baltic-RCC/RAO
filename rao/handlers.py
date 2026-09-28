@@ -222,7 +222,10 @@ def build_voltage_documents(voltage_results: pd.DataFrame,
                 'high_voltage_limit': cnec.get('high_voltage_limit'),
                 'low_voltage_limit': cnec.get('low_voltage_limit'),
                 'is_violation': bool(v_mag > limit if limit_type == 'HIGH_VOLTAGE' else v_mag < limit),
-                'margin': _finite(row.get('margin')),
+                # Monitoring reports one margin per CNEC - the tightest constraint in
+                # either direction - so derive the margin for the limit in scope.
+                'margin': (limit - v_mag) if limit_type == 'HIGH_VOLTAGE' else (v_mag - limit),
+                'margin_reported': _finite(row.get('margin')),
                 'unit': cnec.get('unit'),
                 'contingency_id': contingency_id,
                 'contingency_name': contingency_names.get(contingency_id),
@@ -685,7 +688,7 @@ class HandlerVirtualOperator:
                         index=ELASTIC_VOLTAGE_RESULTS_INDEX,
                         json_message_list=voltage_docs,
                         id_from_metadata=True,
-                        id_metadata_list=['@scenario_timestamp', 'cnec_id', 'limit_type'],
+                        id_metadata_list=['@time_horizon', '@scenario_timestamp', 'cnec_id', 'limit_type'],
                         hashing=True,
                     )
         logger.success(f"Message handling completed successfully")
