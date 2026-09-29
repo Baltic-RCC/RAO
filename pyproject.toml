@@ -19,7 +19,7 @@ dependencies = [
     "setuptools>=80.4.0",
     "triplets>=0.0.11",
     "typing-extensions>=4.13.2",
-    "uv>=0.8.3",
+    "uv>=0.11.15",
 ]
 
 [[tool.uv.index]]
