@@ -12,6 +12,25 @@ from integrations.elastic import Elastic
 
 parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
 
+# Metadata fields identifying the party that published an input profile, most
+# specific first. Records published over EDX carry only 'publisher'.
+PARTY_FIELDS = ("entity", "publisher")
+
+
+def resolve_party_field(df: pd.DataFrame) -> str | None:
+    """Return the column identifying the publishing party, or None if absent.
+
+    Keeps a malformed metadata feed from failing as a KeyError deep inside a
+    pandas groupby, which says nothing about the actual problem.
+    """
+    for field in PARTY_FIELDS:
+        if field in df.columns:
+            return field
+
+    logger.warning(f"Input metadata carries none of {PARTY_FIELDS}; profiles cannot be "
+                   f"grouped per publishing party")
+    return None
+
 
 class ObjectStorage:
 
@@ -152,7 +171,9 @@ class ObjectStorage:
         metadata_with_content = []
         if not df.empty:
             # Sort by latest version
-            df = df.sort_values(by=["Model.version", "Model.created"], ascending=[False, False]).groupby(["entity", "keyword"]).first()
+            party_field = resolve_party_field(df)
+            group_by = [field for field in (party_field, "keyword") if field]
+            df = df.sort_values(by=["Model.version", "Model.created"], ascending=[False, False]).groupby(group_by).first()
             # Get content
             for file_object in df.reset_index().to_dict("records"):
                 try:
@@ -199,7 +220,9 @@ class ObjectStorage:
         metadata_with_content = []
         if not df.empty:
             # Sort by latest version
-            df = df.sort_values(by=["startDate", "Model.version", "Model.created"], ascending=[False, False, False]).groupby(["entity", "keyword"]).first()
+            party_field = resolve_party_field(df)
+            group_by = [field for field in (party_field, "keyword") if field]
+            df = df.sort_values(by=["startDate", "Model.version", "Model.created"], ascending=[False, False, False]).groupby(group_by).first()
             # Get content
             for file_object in df.reset_index().to_dict("records"):
                 try:

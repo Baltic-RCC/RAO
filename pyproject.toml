@@ -29,6 +29,11 @@ url = "https://pypi.org/simple"
 [[tool.uv.index]]
 name = "local-pypi"
 url = "https://artifactory.elering.sise/artifactory/api/pypi/pssepip/simple"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
 #default = true
 
 [tool.uv]
