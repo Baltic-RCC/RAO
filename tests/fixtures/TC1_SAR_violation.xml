@@ -1,0 +1,52 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:cim="https://cim.ucaiug.io/ns#" xmlns:nc="https://cim4.eu/ns/nc#" xmlns:md="http://iec.ch/TC57/61970-552/ModelDescription/1#" xmlns:dcterms="http://purl.org/dc/terms/#" xmlns:dcat="http://www.w3.org/ns/dcat#" xmlns:brcc="https://baltic-rcc.eu/ns/brcc-nc#">
+  <!-- Synthetic SecurityAnalysisResult for the TC1 (BE/NL MicroGrid) test configuration.
+       PowerFlowResult.ACDCTerminal carries the conducting equipment id, as produced by the Baltic RCC CSA. -->
+  <md:FullModel rdf:about="urn:uuid:5a3c9d42-3f0e-4b8e-9d7a-2b1f6c0e4a11">
+    <dcterms:identifier>urn:uuid:5a3c9d42-3f0e-4b8e-9d7a-2b1f6c0e4a11</dcterms:identifier>
+    <dcterms:conformsTo rdf:resource="https://ap.cim4.eu/SecurityAnalysisResult/2.3"/>
+    <md:Model.version>1</md:Model.version>
+    <dcat:startDate>2024-06-13T09:30:00Z</dcat:startDate>
+    <dcat:endDate>2024-06-13T10:30:00Z</dcat:endDate>
+    <dcat:keyword>SAR</dcat:keyword>
+  </md:FullModel>
+  <!-- BE-Line_3 overloaded after OCO_BE-Line_1: relevant current violation -->
+  <nc:ContingencyPowerFlowResult rdf:ID="_c0a1b2c3-0001-4000-8000-000000000001">
+    <nc:PowerFlowResult.atTime>2024-06-13T09:30:00Z</nc:PowerFlowResult.atTime>
+    <nc:PowerFlowResult.isViolation>true</nc:PowerFlowResult.isViolation>
+    <nc:PowerFlowResult.value>112.5</nc:PowerFlowResult.value>
+    <nc:PowerFlowResult.valueA>562.5</nc:PowerFlowResult.valueA>
+    <nc:PowerFlowResult.ACDCTerminal rdf:resource="#_78736387-5f60-4832-b3fe-d50daf81b0a6"/>
+    <brcc:PowerFlowResult.EquipmentName>BE-Line_3</brcc:PowerFlowResult.EquipmentName>
+    <nc:ContingencyPowerFlowResult.Contingency rdf:resource="#_f38b9192-6064-4f1a-b2c6-5459ceb514b0"/>
+  </nc:ContingencyPowerFlowResult>
+  <!-- Violation below VIOLATION_THRESHOLD_PERCENT: filtered out -->
+  <nc:ContingencyPowerFlowResult rdf:ID="_c0a1b2c3-0002-4000-8000-000000000002">
+    <nc:PowerFlowResult.atTime>2024-06-13T09:30:00Z</nc:PowerFlowResult.atTime>
+    <nc:PowerFlowResult.isViolation>true</nc:PowerFlowResult.isViolation>
+    <nc:PowerFlowResult.value>99.9</nc:PowerFlowResult.value>
+    <nc:PowerFlowResult.valueA>499.5</nc:PowerFlowResult.valueA>
+    <nc:PowerFlowResult.ACDCTerminal rdf:resource="#_7f43f508-2496-4b64-9146-0a40406cbe49"/>
+    <brcc:PowerFlowResult.EquipmentName>NL-Line_1</brcc:PowerFlowResult.EquipmentName>
+    <nc:ContingencyPowerFlowResult.Contingency rdf:resource="#_288ac5c2-128e-40cd-b5b2-d3d79779694c"/>
+  </nc:ContingencyPowerFlowResult>
+  <!-- Not a violation: filtered out -->
+  <nc:ContingencyPowerFlowResult rdf:ID="_c0a1b2c3-0003-4000-8000-000000000003">
+    <nc:PowerFlowResult.atTime>2024-06-13T09:30:00Z</nc:PowerFlowResult.atTime>
+    <nc:PowerFlowResult.isViolation>false</nc:PowerFlowResult.isViolation>
+    <nc:PowerFlowResult.value>120.0</nc:PowerFlowResult.value>
+    <nc:PowerFlowResult.valueA>600.0</nc:PowerFlowResult.valueA>
+    <nc:PowerFlowResult.ACDCTerminal rdf:resource="#_a16b4a6c-70b1-4abf-9a9d-bd0fa47f9fe4"/>
+    <brcc:PowerFlowResult.EquipmentName>BE-Line_7</brcc:PowerFlowResult.EquipmentName>
+    <nc:ContingencyPowerFlowResult.Contingency rdf:resource="#_844e70d2-b39d-4093-9edc-ef931bc435db"/>
+  </nc:ContingencyPowerFlowResult>
+  <!-- Base case violation: no contingency, dropped by the per-contingency grouping -->
+  <nc:BaseCasePowerFlowResult rdf:ID="_c0a1b2c3-0004-4000-8000-000000000004">
+    <nc:PowerFlowResult.atTime>2024-06-13T09:30:00Z</nc:PowerFlowResult.atTime>
+    <nc:PowerFlowResult.isViolation>true</nc:PowerFlowResult.isViolation>
+    <nc:PowerFlowResult.value>105.0</nc:PowerFlowResult.value>
+    <nc:PowerFlowResult.valueA>1295.6</nc:PowerFlowResult.valueA>
+    <nc:PowerFlowResult.ACDCTerminal rdf:resource="#_78736387-5f60-4832-b3fe-d50daf81b0a6"/>
+    <brcc:PowerFlowResult.EquipmentName>BE-Line_3</brcc:PowerFlowResult.EquipmentName>
+  </nc:BaseCasePowerFlowResult>
+</rdf:RDF>
