@@ -23,16 +23,6 @@ dependencies = [
     "uv>=0.8.3",
 ]
 
-[project.scripts]
-build-rd-crac = "rao.crac.costly_ra.cli:main"
-
-[build-system]
-requires = ["setuptools>=80"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-include = ["rao*", "common*", "config*", "integrations*"]
-
 [tool.pytest.ini_options]
 pythonpath = ["."]
 

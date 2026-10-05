@@ -88,20 +88,7 @@ Mapping from the NC RemedialAction profile (`NcRemedialActionRowSource`):
 | `StaticPropertyRange` `RangeConstraint.normalValue` | UP: Pmax, DOWN: Pmin |
 | `StaticPropertyRange` `RangeConstraint.valueKind` | must be `absolute` (`ValueOffsetKind`) |
 
-### Command line
-
-```bash
-build-rd-crac --ra-profile examples/costly_ra/rd_remedial_actions.xml --costs examples/costly_ra/costs.yaml \
-              [--base-crac crac.json] [--network model.xiidm] --out crac_out.json \
-              [--instant curative] [--contingency CO_ID ...]
-build-rd-crac --rows examples/costly_ra/rd_rows.csv ...      # RCC remedial-action export (CSV) instead
-```
-
-`build-rd-crac` is installed by `uv sync`; `python -m rao.crac.costly_ra.cli` is equivalent. It prints the
-actions written and the units skipped, with reasons. `--network` is optional and only used to check that
-OpenRAO imports the generated CRAC. With `--base-crac`, the actions are merged into an existing CRAC. With
-`--contingency`, `onContingencyStateUsageRules` are written instead of an `onInstantUsageRule`; this needs
-`--base-crac`, because the contingencies must exist.
+### Python API
 
 ```python
 from rao.crac.costly_ra import CostConfig, NcRemedialActionRowSource, build_injection_range_actions, merge_into_crac, import_crac
@@ -111,6 +98,7 @@ rows = NcRemedialActionRowSource(pd.read_RDF(ra_profiles)).read()  # or CsvRowSo
 result = build_injection_range_actions(rows, costs=CostConfig.from_file("costs.yaml"))
 print(result.summary())                                      # actions, skipped units, defaulted costs
 crac = merge_into_crac(base_crac_dict, result.actions)       # or build_crac(result.actions)
+# Building the CRAC above needs no network model; the network is only needed to run the RAO
 imported = import_crac(network, crac)                        # pypowsybl Crac
 rao_result = run_rao(network, imported, load_min_cost_parameters(dc=True))
 results = redispatch_results(imported, rao_result, network)  # action, generator, instant, contingency, P0, P, delta
@@ -165,8 +153,8 @@ compare them with the network model.
 
 Costs are **disabled by default**: without a cost config no `activationCost`/`variationCosts` are written and
 no cost warnings are logged. They are only needed for the MIN_COST objective. Costs are not part of the
-remedial action list. When enabled (`REDISPATCH_COSTS_PATH`, `CracBuilder(redispatch_costs=...)`,
-`build-rd-crac --costs` or `build_injection_range_actions(costs=...)`), they are loaded from YAML or JSON,
+remedial action list. When enabled (`REDISPATCH_COSTS_PATH`, `CracBuilder(redispatch_costs=...)` or
+`build_injection_range_actions(costs=...)`), they are loaded from YAML or JSON,
 keyed by unit action id (see `examples/costly_ra/costs.yaml`):
 
 ```yaml

@@ -5,7 +5,7 @@ import random
 import pytest
 import pandas as pd
 from conftest import (
-    EXAMPLES_DIR, create_network, make_row, nc_profile, nc_remedial_action, nc_unit, read_nc_profile, unit_rows,
+    EXAMPLES_DIR, make_row, nc_remedial_action, nc_unit, read_nc_profile, unit_rows,
 )
 from rao.crac import models
 from rao.crac.builder import CracBuilder
@@ -14,7 +14,6 @@ from rao.crac.costly_ra import (
     build_injection_range_actions, check_ra_usage_limits, crac_to_json, merge_into_crac, normalize_element_id,
     unit_action_id,
 )
-from rao.crac.costly_ra.cli import main as cli_main
 
 KHES = "_f157276b-ba01-4a30-a510-d5939c71018b"
 PHES_G1 = "_a1c42d01-ba01-4def-bae4-37bea73d2960"
@@ -39,12 +38,6 @@ def _single(result):
 
 def _ranges(action: dict) -> list[tuple]:
     return [(r["rangeType"], r["min"], r["max"]) for r in action["ranges"]]
-
-
-def _generator_network(*generators):
-    """Single-bus network holding the given (id, min_p, max_p, target_p) generators."""
-    return create_network(lines=[], loads=[], buses=("B1",),
-                          generators=[(g[0], "B1", g[1], g[2], g[3]) for g in generators])
 
 
 # ---------------------------------------------------------------- input adapter
@@ -479,59 +472,3 @@ def test_merge_rejects_element_already_used_by_a_range_action(element_id, used_b
     base = merge_into_crac(_base_crac(), _actions(("RA_A", "G1", 0.0, 50.0)))
     with pytest.raises(CracMergeError, match=f"already used by range action '{used_by}'"):
         merge_into_crac(base, _actions(("RA_NEW", element_id, 0.0, 50.0)))
-
-
-# ---------------------------------------------------------------- CLI
-
-
-def test_cli_from_nc_profile_writes_crac_and_summary(tmp_path, capsys):
-    profile = tmp_path / "RA.xml"
-    profile.write_text(nc_profile(nc_unit("RA_RD_KHES_G5", KHES, p_min=0.0, p_max=56.0),
-                                  nc_unit("RA_RD_PHES_G1", PHES_G1, p_min=0.0, p_max=98.0),
-                                  nc_unit("RA_RD_PHES_G3", PHES_G3, p_min=0.0, p_max=97.0, up=False, down=False)))
-    out = tmp_path / "crac_out.json"
-
-    code = cli_main(["--ra-profile", str(profile), "--costs", str(EXAMPLES_DIR / "costs.yaml"),
-                     "--out", str(out), "--log-level", "ERROR"])
-
-    assert code == 0
-    crac = json.loads(out.read_text())
-    assert [a["id"] for a in crac["injectionRangeActions"]] == ["RA_RD_KHES_G5", "RA_RD_PHES_G1"]
-    assert crac["injectionRangeActions"][0]["networkElementIdsAndKeys"] == {KHES: 1.0}
-    printed = capsys.readouterr().out
-    assert "Injection range actions written: 2" in printed
-    assert f"RA_RD_PHES_G3 ({PHES_G3}): neither UP nor DOWN direction is available" in printed
-
-
-def test_cli_from_csv_validates_by_openrao_import(tmp_path, capsys):
-    # The network is only used for the import check, not for ranges
-    network = _generator_network((KHES, 0.0, 60.0, 30.0), (PHES_G1, 0.0, 100.0, 50.0))
-    network_path = tmp_path / "model.xiidm"
-    network.save(str(network_path), format="XIIDM")
-    out = tmp_path / "crac_out.json"
-
-    code = cli_main(["--rows", str(EXAMPLES_DIR / "rd_rows.csv"), "--network", str(network_path),
-                     "--out", str(out), "--log-level", "ERROR"])
-
-    assert code == 0
-    assert "Injection range actions written: 2" in capsys.readouterr().out
-
-
-def test_cli_merges_into_base_crac(tmp_path):
-    base_path = tmp_path / "base.json"
-    base_path.write_text(json.dumps(_base_crac()))
-    out = tmp_path / "crac_out.json"
-    code = cli_main(["--rows", str(EXAMPLES_DIR / "rd_rows.csv"), "--base-crac", str(base_path),
-                     "--contingency", "CO_1", "--out", str(out), "--log-level", "ERROR"])
-    assert code == 0
-    crac = json.loads(out.read_text())
-    assert crac["id"] == "BASE"
-    assert crac["networkActions"] == _base_crac()["networkActions"]
-    assert crac["injectionRangeActions"][0]["onContingencyStateUsageRules"] == [
-        {"instant": "curative", "contingencyId": "CO_1"}]
-
-
-def test_cli_rejects_contingency_without_base_crac(tmp_path):
-    code = cli_main(["--rows", str(EXAMPLES_DIR / "rd_rows.csv"), "--contingency", "CO_1",
-                     "--out", str(tmp_path / "out.json"), "--log-level", "CRITICAL"])
-    assert code == 2
