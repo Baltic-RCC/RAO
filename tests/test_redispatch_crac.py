@@ -312,8 +312,18 @@ def test_cost_config_overrides_defaults(log_messages):
     assert not any("RA_A: using default costs" in m for m in log_messages)
 
 
+def test_costs_are_silenced_without_cost_config(log_messages):
+    result = build_injection_range_actions(unit_rows("RA_A", "G1", 0.0, 50.0))
+    action = _single(result)
+    assert "activationCost" not in action
+    assert "variationCosts" not in action
+    assert result.defaulted_costs == {}
+    assert not any("cost" in m for m in log_messages)
+    assert "default costs" not in result.summary()
+
+
 def test_cost_config_builtin_defaults():
-    action = _single(build_injection_range_actions(unit_rows("RA_A", "G1", 0.0, 50.0)))
+    action = _single(build_injection_range_actions(unit_rows("RA_A", "G1", 0.0, 50.0), costs=CostConfig()))
     assert action["activationCost"] == 0.0
     assert action["variationCosts"] == {"up": 1.0, "down": 1.0}
 

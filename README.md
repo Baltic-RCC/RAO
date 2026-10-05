@@ -58,18 +58,24 @@ same `data` triplets (CO/AE/RA). In the RAO worker this is switched off by defau
 
 ```properties
 CRAC_INCLUDE_REDISPATCH = False   # True adds redispatch injection range actions to the CRAC
-REDISPATCH_COSTS_PATH = None      # cost config (YAML/JSON), built-in defaults when None
+REDISPATCH_COSTS_PATH = None      # cost config (YAML/JSON); None = no costs written (default)
 ```
 
-The worker's default RAO parameters use MAX_MIN_MARGIN, which ignores redispatch costs. Use the MIN_COST
-parameters below for cost-based redispatch.
+Each unit has a separate `RA_RD_<unit>_UP` and `RA_RD_<unit>_DOWN` remedial action (alterations
+`RD_<unit>_UP` / `RD_<unit>_DOWN`) on the same RotatingMachine rdf:ID. They are merged into one injection
+range action `RA_RD_<unit>`, with the `curative` usage rule. The instant stays a parameter
+(`redispatch_instant`), so the redispatch actions can later be moved to a separate curative instant.
+
+With the worker's default RAO parameters (MAX_MIN_MARGIN), costs are not used. The redispatch stays
+balanced, but the RAO maximizes the margin instead of minimizing the volume, so activated units can go
+all the way to their Pmin/Pmax.
 
 Mapping from the NC RemedialAction profile (`NcRemedialActionRowSource`):
 
 | NC object / attribute | used as |
 |---|---|
 | `GridStateAlterationRemedialAction` `IdentifiedObject.name` | action id/name, without `_UP`/`_DOWN` |
-| `RemedialAction.RemedialActionSystemOperator` | `operator` (as for the network actions) |
+| `RemedialAction.RemedialActionSystemOperator` | `operator`, as is (same as for the topology network actions) |
 | `RemedialAction.normalAvailable` and `GridStateAlteration.normalEnabled` | availability of the direction |
 | `RemedialAction.kind` | checked against the usage rule instant (warning only) |
 | `RotatingMachineAction.RotatingMachine` | network element, written as `_<mRID>` |
@@ -118,7 +124,8 @@ alteration_type, alteration_name, property, grid_element_id, normal_value, direc
   `absolute` is rejected with an error.
 - Rows are grouped by grid element, and **one** `InjectionRangeAction` is emitted per unit, because OpenRAO
   does not allow two range actions on the same element.
-- Action id and name = remedial action name without the `_UP`/`_DOWN` suffix (e.g. `RA_RD_KHES_G5`).
+- Action id and name = remedial action name without the `_UP`/`_DOWN` suffix (`RA_RD_ME_G1_DOWN` →
+  `RA_RD_ME_G1`); the alteration name (`RD_ME_G1_DOWN`) is not used.
 - `networkElementIdsAndKeys = {"_<RotatingMachine mRID>": 1.0}`: exactly one element with key 1.0, so the
   set-point is the generator MW. The element id always gets a single leading `_`, like the other CRAC
   elements and the IIDM ids imported with `source-for-iidm-id = rdfID`.
@@ -149,8 +156,11 @@ compare them with the network model.
 
 ### Cost config
 
-Costs are not part of the export. They are loaded from YAML or JSON, keyed by unit action id (see
-`examples/redispatch/costs.yaml`):
+Costs are **disabled by default**: without a cost config no `activationCost`/`variationCosts` are written and
+no cost warnings are logged. They are only needed for the MIN_COST objective. Costs are not part of the
+remedial action list. When enabled (`REDISPATCH_COSTS_PATH`, `CracBuilder(redispatch_costs=...)`,
+`build-rd-crac --costs` or `build_injection_range_actions(costs=...)`), they are loaded from YAML or JSON,
+keyed by unit action id (see `examples/redispatch/costs.yaml`):
 
 ```yaml
 defaults:
@@ -164,13 +174,14 @@ units:
     variationCosts: {down: 40.0}  # missing values fall back to defaults
 ```
 
-Any value missing for a unit falls back to `defaults`, and a warning is logged for every unit that uses a
-default. Without a `defaults` section, the built-in defaults are `activationCost: 0.0` and
-`variationCosts: {up: 1.0, down: 1.0}`.
+When costs are enabled, any value missing for a unit falls back to `defaults`, and a warning is logged for
+every unit that uses a default. Without a `defaults` section, the built-in defaults are
+`activationCost: 0.0` and `variationCosts: {up: 1.0, down: 1.0}`.
 
 ### Example output
 
-Unit with both directions available:
+Unit with both directions available (with costs enabled; without them `activationCost` and
+`variationCosts` are left out):
 
 ```json
 {

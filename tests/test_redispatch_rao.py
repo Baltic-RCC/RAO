@@ -7,6 +7,7 @@ from rao.crac import models
 from rao.crac.builder import CracBuilder
 from rao.crac.redispatch import CostConfig, build_crac, build_injection_range_actions, merge_into_crac, validate_crac
 from rao.parameters.loadflow import CGMES_IMPORT_PARAMETERS
+from rao.parameters.manager import RaoSettingsManager
 from rao.redispatch import apply_redispatch, load_min_cost_parameters, redispatch_results, run_rao
 
 COSTS = CostConfig.from_dict({
@@ -30,6 +31,16 @@ def _base_crac(flow_cnecs: list[dict], contingencies: list[dict] | None = None) 
     crac["contingencies"] = contingencies or []
     crac["flowCnecs"] = flow_cnecs
     return crac
+
+
+def _curative_base_crac() -> dict:
+    """Parallel L13a/L13b case: after losing L13b, L13a carries 300 MW against a curative 250 MW limit."""
+    return _base_crac(
+        flow_cnecs=[_flow_cnec("L13a-preventive", "L13a", "preventive", 250.0),
+                    _flow_cnec("L13a-outage", "L13a", "outage", 1000.0, "CO_L13b"),
+                    _flow_cnec("L13a-curative", "L13a", "curative", 250.0, "CO_L13b")],
+        contingencies=[{"id": "CO_L13b", "name": "CO_L13b", "networkElementsIds": ["L13b"]}],
+    )
 
 
 def _generator_rows(**availability):
@@ -158,6 +169,32 @@ def test_nc_profile_through_crac_builder_to_rao(tmp_path):
     assert results.loc["RA_B", "optimized_p"] == pytest.approx(715.0, abs=TOLERANCE_MW)
 
 
+def test_curative_redispatch_without_costs_under_worker_max_min_margin_parameters():
+    """
+    CRAC without costs, run with the worker's default (MAX_MIN_MARGIN, AC) parameters.
+    The redispatch stays balanced, but MAX_MIN_MARGIN maximizes the margin rather than
+    minimizing the volume, so the units go to their limits (GEN_A -> 0, GEN_B -> 800).
+    """
+    network = triangle_network(parallel_l13=True)
+    rows = unit_rows("RA_A", "GEN_A", 0.0, 500.0) + unit_rows("RA_B", "GEN_B", 0.0, 800.0)
+    result = build_injection_range_actions(rows)
+    assert "activationCost" not in result.to_dicts()[0]
+    imported = validate_crac(network, merge_into_crac(_curative_base_crac(), result.actions))
+    parameters = pypowsybl.rao.Parameters.from_buffer_source(RaoSettingsManager().to_bytesio())
+    assert parameters.to_json()["objective-function"]["type"] == "MAX_MIN_MARGIN"
+
+    rao_result = run_rao(network, imported, parameters)
+    results = redispatch_results(imported, rao_result, network).set_index("action_id")
+
+    assert set(results["instant"]) == {"curative"}
+    assert results["delta"].sum() == pytest.approx(0.0, abs=TOLERANCE_MW)
+    assert results.loc["RA_A", "optimized_p"] == pytest.approx(0.0, abs=TOLERANCE_MW)
+    assert results.loc["RA_B", "optimized_p"] == pytest.approx(800.0, abs=TOLERANCE_MW)
+    cnecs = rao_result.get_flow_cnec_results()
+    curative = cnecs[(cnecs["cnec_id"] == "L13a-curative") & (cnecs["optimized_instant"] == "curative")]
+    assert curative["margin"].min() > 0
+
+
 def test_up_only_units_cannot_redispatch():
     """With every unit up-only, any change breaks the balance: no range action is activated."""
     network, crac = _preventive_case(RA_A=(True, False), RA_B=(True, False))
@@ -178,13 +215,7 @@ def test_balanced_curative_redispatch_with_default_instant():
     network = triangle_network(parallel_l13=True)
     rows = (unit_rows("RA_A", "GEN_A", 0.0, 500.0) + unit_rows("RA_B", "GEN_B", 0.0, 800.0))
     result = build_injection_range_actions(rows, costs=COSTS)  # curative by default
-    base = _base_crac(
-        flow_cnecs=[_flow_cnec("L13a-preventive", "L13a", "preventive", 250.0),
-                    _flow_cnec("L13a-outage", "L13a", "outage", 1000.0, "CO_L13b"),
-                    _flow_cnec("L13a-curative", "L13a", "curative", 250.0, "CO_L13b")],
-        contingencies=[{"id": "CO_L13b", "name": "CO_L13b", "networkElementsIds": ["L13b"]}],
-    )
-    imported = validate_crac(network, merge_into_crac(base, result.actions))
+    imported = validate_crac(network, merge_into_crac(_curative_base_crac(), result.actions))
 
     rao_result = run_rao(network, imported)
     results = redispatch_results(imported, rao_result, network)

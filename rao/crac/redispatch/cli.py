@@ -1,7 +1,7 @@
 """
 build-rd-crac: build a JSON CRAC with redispatching injection range actions.
 
-    build-rd-crac (--ra-profile RA.xml ... | --rows export.csv) --costs costs.yaml
+    build-rd-crac (--ra-profile RA.xml ... | --rows export.csv) [--costs costs.yaml]
                   [--base-crac crac.json] [--network model.xiidm] --out crac_out.json
 
 Pmin/Pmax and availability come from the remedial action list only. The network model is
@@ -40,7 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     source.add_argument("--ra-profile", action="append", metavar="FILE",
                         help="NC RemedialAction profile (RDF/XML or zip, repeatable), as retrieved for the CRAC building")
     source.add_argument("--rows", help="RCC remedial-action export (CSV)")
-    parser.add_argument("--costs", help="cost config (YAML or JSON) keyed by unit action id; built-in defaults if omitted")
+    parser.add_argument("--costs", help="cost config (YAML or JSON) keyed by unit action id; no costs are written if omitted")
     parser.add_argument("--network", help="network model, only used to validate the CRAC by OpenRAO import")
     parser.add_argument("--base-crac", help="existing JSON CRAC to merge the actions into")
     parser.add_argument("--out", required=True, help="output JSON CRAC")
@@ -67,7 +67,8 @@ def main(argv: list[str] | None = None) -> int:
         rows = NcRemedialActionRowSource(pd.read_RDF(args.ra_profile)).read()
     else:
         rows = CsvRowSource(args.rows).read()
-    costs = CostConfig.from_file(args.costs) if args.costs else CostConfig()
+    # Costs are only written when a cost config is given
+    costs = CostConfig.from_file(args.costs) if args.costs else None
 
     result = build_injection_range_actions(rows, costs=costs, instant=args.instant,
                                            contingency_ids=args.contingencies)

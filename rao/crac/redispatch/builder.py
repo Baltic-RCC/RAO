@@ -168,12 +168,13 @@ def build_injection_range_actions(rows: Iterable[RedispatchRow],
 
     Args:
         rows: typed rows from any RowSource
-        costs: cost configuration, built-in defaults are used if not given
+        costs: cost configuration. Costs are disabled when not given: no activationCost /
+            variationCosts are written and no cost warnings are logged (MAX_MIN_MARGIN runs
+            do not use them). Pass a CostConfig to enable them, e.g. for MIN_COST.
         instant: instant of the usage rule (default 'curative')
         contingency_ids: if given, onContingencyStateUsageRules for these contingencies
             are emitted instead of an onInstantUsageRule
     """
-    costs = costs or CostConfig()
     result = RedispatchBuildResult()
 
     relevant = []
@@ -222,7 +223,7 @@ def _skip(result: RedispatchBuildResult, unit_id: str, element_id: str, reason: 
 
 
 def _build_unit_action(rows: list[RedispatchRow],
-                       costs: CostConfig,
+                       costs: CostConfig | None,
                        instant: str,
                        contingency_ids: list[str] | None,
                        result: RedispatchBuildResult) -> models.InjectionRangeAction | None:
@@ -275,17 +276,20 @@ def _build_unit_action(rows: list[RedispatchRow],
         _skip(result, unit_id, element_id, "neither UP nor DOWN direction is available")
         return None
 
-    cost, defaulted = costs.resolve(unit_id)
-    if defaulted:
-        logger.warning(f"Redispatch unit {unit_id}: using default costs for {', '.join(defaulted)}")
-        result.defaulted_costs[unit_id] = defaulted
+    cost_fields = {}
+    if costs is not None:
+        cost, defaulted = costs.resolve(unit_id)
+        if defaulted:
+            logger.warning(f"Redispatch unit {unit_id}: using default costs for {', '.join(defaulted)}")
+            result.defaulted_costs[unit_id] = defaulted
+        cost_fields = {"activationCost": cost.activation_cost,
+                       "variationCosts": models.VariationCosts(up=cost.up, down=cost.down)}
 
     return models.InjectionRangeAction(
         id=unit_id,
         name=unit_id,
         operator=rows[0].party,
-        activationCost=cost.activation_cost,
-        variationCosts=models.VariationCosts(up=cost.up, down=cost.down),
+        **cost_fields,
         networkElementIdsAndKeys={element_id: 1.0},
         ranges=_ranges(p_min, p_max, up_available, down_available),
         **_usage_rules(instant, contingency_ids),
