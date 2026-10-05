@@ -15,12 +15,10 @@ import pandas as pd
 import pypowsybl
 import triplets  # noqa: F401  registers pd.read_RDF
 from loguru import logger
-from rao.crac.redispatch.builder import (
-    CRAC_VERSION, DEFAULT_INSTANT, build_crac, build_injection_range_actions, crac_to_json, merge_into_crac,
-    validate_crac,
-)
-from rao.crac.redispatch.costs import CostConfig
-from rao.crac.redispatch.sources import CsvRowSource, NcRemedialActionRowSource
+from rao.crac.costly_ra.crac import CRAC_VERSION, DEFAULT_INSTANT, build_crac, crac_to_json, merge_into_crac, validate_crac
+from rao.crac.costly_ra.redispatch import build_injection_range_actions
+from rao.crac.costly_ra.costs import CostConfig
+from rao.crac.costly_ra.sources import CsvRowSource, NcRemedialActionRowSource
 from rao.parameters.loadflow import CGMES_IMPORT_PARAMETERS
 
 

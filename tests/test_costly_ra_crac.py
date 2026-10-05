@@ -1,4 +1,4 @@
-"""Unit tests for the redispatching CRAC builder (rao.crac.redispatch)."""
+"""Unit tests for the redispatching CRAC builder (rao.crac.costly_ra)."""
 import io
 import json
 import random
@@ -9,12 +9,12 @@ from conftest import (
 )
 from rao.crac import models
 from rao.crac.builder import CracBuilder
-from rao.crac.redispatch import (
+from rao.crac.costly_ra import (
     BIG, CostConfig, CracMergeError, CsvRowSource, NcRemedialActionRowSource, RowParseError, build_crac,
     build_injection_range_actions, check_ra_usage_limits, crac_to_json, merge_into_crac, normalize_element_id,
     unit_action_id,
 )
-from rao.crac.redispatch.cli import main as cli_main
+from rao.crac.costly_ra.cli import main as cli_main
 
 KHES = "_f157276b-ba01-4a30-a510-d5939c71018b"
 PHES_G1 = "_a1c42d01-ba01-4def-bae4-37bea73d2960"
@@ -61,6 +61,20 @@ def test_csv_source_reads_typed_rows():
     assert rows[4].available is False
 
 
+def test_csv_source_reads_empty_normal_value_as_missing():
+    text = (EXAMPLES_DIR / "rd_rows.csv").read_text().replace(",0,down,absolute", ",,down,absolute", 1)
+    rows = CsvRowSource(io.StringIO(text)).read()
+    assert rows[1].ra_name == "RA_RD_KHES_G5_DOWN"
+    assert rows[1].normal_value is None
+
+
+def test_nc_source_alteration_without_range_takes_direction_from_ra_name(tmp_path):
+    rows = NcRemedialActionRowSource(read_nc_profile(
+        nc_remedial_action("RA_RD_ME_G1_DOWN", "_me-g1", "down", None), tmp_path=tmp_path)).read()
+    assert [(r.ra_name, r.direction, r.normal_value, r.property) for r in rows] == [
+        ("RA_RD_ME_G1_DOWN", "down", None, "RotatingMachine.p")]
+
+
 def test_csv_source_rejects_missing_columns():
     with pytest.raises(RowParseError, match="missing required columns"):
         CsvRowSource(io.StringIO("kind,ra_name\ncurative,RA_X_UP\n")).read()
@@ -102,19 +116,24 @@ def test_nc_profile_maps_ranges_and_availability_from_remedial_actions(tmp_path)
         nc_unit("RA_RD_KHES_G5", KHES, p_min=0.0, p_max=56.0),
         nc_unit("RA_RD_PHES_G1", PHES_G1, p_min=0.0, p_max=98.0, down=False),   # DOWN normalAvailable = false
         nc_unit("RA_RD_PHES_G3", "_4df6a958", p_min=0.0, p_max=97.0, up=False, down=False),
-        nc_remedial_action("RA_RD_KRU_G1_DOWN", "_kru-g1", "down", -225.0),     # pumping, DOWN row only
+        nc_remedial_action("RA_RD_KRU_G1_DOWN", "_kru-g1", "down", -225.0),     # DOWN only: no max range
+        nc_remedial_action("RA_RD_KHES_G6_UP", "_khes-g6", "up", 55.6),          # UP only: Pmin = 0
+        nc_remedial_action("RA_RD_ME_G1_UP", "_me-g1", "up", 80.0),
+        nc_remedial_action("RA_RD_ME_G1_DOWN", "_me-g1", "down", None),         # no StaticPropertyRange
         nc_remedial_action("RA_Q_NL_G2", "_nl-g2", "upAndDown", -60.0, property_name="RotatingMachine.q"),
         tmp_path=tmp_path,
     )
     result = build_injection_range_actions(NcRemedialActionRowSource(data).read(), costs=SAMPLE_COSTS)
     actions = {a["id"]: a for a in result.to_dicts()}
 
-    assert sorted(actions) == ["RA_RD_KHES_G5", "RA_RD_KRU_G1", "RA_RD_PHES_G1"]
+    assert sorted(actions) == ["RA_RD_KHES_G5", "RA_RD_KHES_G6", "RA_RD_ME_G1", "RA_RD_PHES_G1"]
     assert actions["RA_RD_KHES_G5"]["networkElementIdsAndKeys"] == {KHES: 1.0}
     assert _ranges(actions["RA_RD_KHES_G5"]) == [(ABSOLUTE, 0.0, 56.0)]
     assert _ranges(actions["RA_RD_PHES_G1"]) == [(ABSOLUTE, 0.0, 98.0), (RELATIVE, 0.0, BIG)]
-    assert _ranges(actions["RA_RD_KRU_G1"]) == [(ABSOLUTE, -225.0, BIG), (RELATIVE, -BIG, 0.0)]
+    assert _ranges(actions["RA_RD_KHES_G6"]) == [(ABSOLUTE, 0.0, 55.6), (RELATIVE, 0.0, BIG)]
+    assert _ranges(actions["RA_RD_ME_G1"]) == [(ABSOLUTE, 0.0, 80.0)]
     assert [(u.unit_id, u.reason) for u in result.skipped] == [
+        ("RA_RD_KRU_G1", "no max range (UP normalValue) in the remedial action list, cannot determine how much to shift"),
         ("RA_RD_PHES_G3", "neither UP nor DOWN direction is available")]
     assert len(result.ignored_rows) == 1  # RotatingMachine.q
 
@@ -207,15 +226,33 @@ def test_unit_with_no_direction_available_is_skipped(log_messages):
     assert any("RA_U (_G1) skipped" in m for m in log_messages)
 
 
-def test_missing_rows_open_the_bound_and_keep_the_direction_closed(log_messages):
-    """No model lookup: the missing side is opened to BIG, the relative range keeps it at P0."""
+def test_missing_min_range_defaults_to_zero(log_messages):
+    # No DOWN remedial action: Pmin = 0 and DOWN is not offered
     up_only = _single(build_injection_range_actions([make_row("RA_U_UP", "G1", "up", 93.0)]))
-    assert _ranges(up_only) == [(ABSOLUTE, -BIG, 93.0), (RELATIVE, 0.0, BIG)]
-    assert any(f"DOWN row missing, DOWN not offered, using Pmin = {-BIG}" in m for m in log_messages)
+    assert _ranges(up_only) == [(ABSOLUTE, 0.0, 93.0), (RELATIVE, 0.0, BIG)]
+    assert any("RA_U: no min range (DOWN normalValue) in the remedial action list, using Pmin = 0" in m
+               for m in log_messages)
 
-    down_only = _single(build_injection_range_actions([make_row("RA_U_DOWN", "G1", "down", 5.0)]))
-    assert _ranges(down_only) == [(ABSOLUTE, 5.0, BIG), (RELATIVE, -BIG, 0.0)]
-    assert any(f"UP row missing, UP not offered, using Pmax = {BIG}" in m for m in log_messages)
+    # DOWN remedial action without a range value: Pmin = 0, DOWN stays available
+    rows = [make_row("RA_U_UP", "G1", "up", 93.0), make_row("RA_U_DOWN", "G1", "down", None)]
+    assert _ranges(_single(build_injection_range_actions(rows))) == [(ABSOLUTE, 0.0, 93.0)]
+
+
+@pytest.mark.parametrize("rows", [
+    [make_row("RA_U_DOWN", "G1", "down", 5.0)],                                           # no UP action
+    [make_row("RA_U_UP", "G1", "up", None), make_row("RA_U_DOWN", "G1", "down", 5.0)],   # UP without value
+])
+def test_missing_max_range_leaves_the_unit_out(rows, log_messages):
+    result = build_injection_range_actions(rows)
+    assert result.actions == []
+    assert [(u.unit_id, u.grid_element_id, u.reason) for u in result.skipped] == [
+        ("RA_U", "_G1", "no max range (UP normalValue) in the remedial action list, cannot determine how much to shift")]
+    assert any("RA_U (_G1) skipped: no max range" in m for m in log_messages)
+
+
+def test_missing_value_skips_value_kind_check():
+    rows = [make_row("RA_U_UP", "G1", "up", 93.0), make_row("RA_U_DOWN", "G1", "down", None, value_kind="")]
+    assert _ranges(_single(build_injection_range_actions(rows))) == [(ABSOLUTE, 0.0, 93.0)]
 
 
 @pytest.mark.parametrize("row_id", ["f157276b", "_f157276b", "__f157276b"])

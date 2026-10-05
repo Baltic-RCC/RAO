@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-build-rd-crac = "rao.crac.redispatch.cli:main"
+build-rd-crac = "rao.crac.costly_ra.cli:main"
 
 [build-system]
 requires = ["setuptools>=80"]

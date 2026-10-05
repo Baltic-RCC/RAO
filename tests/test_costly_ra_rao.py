@@ -5,10 +5,10 @@ import pytest
 from conftest import TC1_CGMES, nc_unit, read_nc_profile, triangle_network, unit_rows
 from rao.crac import models
 from rao.crac.builder import CracBuilder
-from rao.crac.redispatch import CostConfig, build_crac, build_injection_range_actions, merge_into_crac, validate_crac
+from rao.crac.costly_ra import CostConfig, build_crac, build_injection_range_actions, merge_into_crac, validate_crac
 from rao.parameters.loadflow import CGMES_IMPORT_PARAMETERS
 from rao.parameters.manager import RaoSettingsManager
-from rao.redispatch import apply_redispatch, load_min_cost_parameters, redispatch_results, run_rao
+from rao.costly_ra import apply_redispatch, load_min_cost_parameters, redispatch_results, run_rao
 
 COSTS = CostConfig.from_dict({
     "defaults": {"activationCost": 100.0, "variationCosts": {"up": 10.0, "down": 10.0}},

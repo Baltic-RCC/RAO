@@ -7,7 +7,7 @@ from rao.crac import models
 import json
 from common.decorators import performance_counter
 from rao.crac.context import CracWorkaroundContext
-from rao.crac.redispatch import CostConfig, NcRemedialActionRowSource, build_injection_range_actions
+from rao.crac.costly_ra import CostConfig, NcRemedialActionRowSource, build_injection_range_actions
 
 
 class CracBuilder:
@@ -1144,7 +1144,7 @@ class CracBuilder:
         actions. Pmin/Pmax come from the StaticPropertyRange normalValue of the DOWN/UP alterations
         and availability from normalAvailable/normalEnabled; the network model is not used.
         Costs are only written when redispatch_costs is given (not needed for MAX_MIN_MARGIN).
-        See rao.crac.redispatch.builder for the mapping rules.
+        See rao.crac.costly_ra.redispatch for the mapping rules.
         """
         rows = NcRemedialActionRowSource(self.data).read()
         result = build_injection_range_actions(rows, costs=self.redispatch_costs, instant=instant)

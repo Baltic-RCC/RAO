@@ -224,7 +224,7 @@ class Crac(BaseModel):
     # Kept unset unless the opt-in ER VoltageAngleLimit processing is requested.
     angleCnecs: Optional[List[AngleCnec]] = None
     networkActions: List[NetworkAction] = Field(default_factory=list)
-    # Kept unset unless redispatching range actions are added (see rao.crac.redispatch)
+    # Kept unset unless redispatching range actions are added (see rao.crac.costly_ra)
     injectionRangeActions: Optional[List[InjectionRangeAction]] = None
 
     @field_serializer("voltageCnecs", mode='plain')

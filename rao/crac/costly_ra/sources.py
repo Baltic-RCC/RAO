@@ -2,7 +2,7 @@
 Input adapters for redispatching remedial-action rows.
 
 Every source converts its native format into a list of :class:`RedispatchRow` records,
-so the CRAC mapping in :mod:`rao.crac.redispatch.builder` does not depend on where the
+so the CRAC mapping in :mod:`rao.crac.costly_ra.redispatch` does not depend on where the
 rows come from:
     - NcRemedialActionRowSource: NC RemedialAction profile (RA list from object storage),
       loaded into triplets the same way as for the topology action CRAC building
@@ -45,7 +45,7 @@ class RedispatchRow:
     alteration_name: str
     property: str
     grid_element_id: str
-    normal_value: float
+    normal_value: float | None  # None: the remedial action list holds no range value
     direction: str
     value_kind: str
 
@@ -67,7 +67,9 @@ def _parse_bool(value: str, row_number: int) -> bool:
     raise RowParseError(f"Row {row_number}: invalid 'available' value '{value}', expected true/false")
 
 
-def _parse_float(value: str, row_number: int) -> float:
+def _parse_float(value: str, row_number: int) -> float | None:
+    if not str(value).strip():
+        return None
     try:
         return float(str(value).strip())
     except ValueError:
@@ -133,6 +135,16 @@ def _last_segment(value) -> str:
     return str(value).split("/")[-1] if _present(value) else ""
 
 
+def _direction_from_name(name: str) -> str:
+    """'RA_RD_ME_G1_UP' -> 'up', 'RA_RD_ME_G1_DOWN' -> 'down'"""
+    upper = name.upper()
+    if upper.endswith("_UP"):
+        return DIRECTION_UP
+    if upper.endswith("_DOWN"):
+        return DIRECTION_DOWN
+    return ""
+
+
 def _present(value) -> bool:
     return value is not None and not (isinstance(value, float) and pd.isna(value)) and value is not pd.NA
 
@@ -151,6 +163,8 @@ class NcRemedialActionRowSource:
         RotatingMachineAction              -> alteration_name, grid_element_id (RotatingMachine),
                                               available (normalEnabled)
         StaticPropertyRange                -> property, normal_value, direction, value_kind
+    An alteration without StaticPropertyRange (or without normalValue) gives a row with
+    normal_value None; its direction is then taken from the _UP/_DOWN suffix of the RA name.
     """
 
     def __init__(self, data: pd.DataFrame):
@@ -189,10 +203,10 @@ class NcRemedialActionRowSource:
             if not _text(alteration.get("RotatingMachineAction.RotatingMachine")):
                 logger.warning(f"RotatingMachineAction {name} has no RotatingMachine, ignored")
                 continue
-            alteration_ranges = ranges_by_alteration.get(alteration_id, [])
-            if not alteration_ranges:
-                logger.warning(f"RotatingMachineAction {name} has no StaticPropertyRange, ignored")
-                continue
+            ra_name = _text(remedial_action.get("IdentifiedObject.name"))
+            # Without a StaticPropertyRange the action still counts for its direction (from the
+            # RA name suffix) with no range value, the mapping decides how to handle that
+            alteration_ranges = ranges_by_alteration.get(alteration_id) or [{}]
 
             # Missing flags are treated as true, as in the profile defaults
             available = (_text(remedial_action.get("RemedialAction.normalAvailable")).lower() != "false"
@@ -200,14 +214,19 @@ class NcRemedialActionRowSource:
 
             for property_range in alteration_ranges:
                 normal_value = property_range.get("RangeConstraint.normalValue")
-                try:
-                    normal_value = float(normal_value)
-                except (TypeError, ValueError):
-                    raise RowParseError(f"RotatingMachineAction {name}: invalid StaticPropertyRange normalValue "
-                                        f"'{normal_value}'") from None
+                if not _text(normal_value):
+                    normal_value = None
+                else:
+                    try:
+                        normal_value = float(normal_value)
+                    except (TypeError, ValueError):
+                        raise RowParseError(f"RotatingMachineAction {name}: invalid StaticPropertyRange normalValue "
+                                            f"'{normal_value}'") from None
+                direction = (_enum_value(property_range.get("RangeConstraint.direction")).lower()
+                             or _direction_from_name(ra_name))
                 rows.append(RedispatchRow(
                     kind=_enum_value(remedial_action.get("RemedialAction.kind")),
-                    ra_name=_text(remedial_action.get("IdentifiedObject.name")),
+                    ra_name=ra_name,
                     available=available,
                     area=_last_segment(remedial_action.get("RemedialAction.AppointedToRegion")),
                     party=_text(remedial_action.get("RemedialAction.RemedialActionSystemOperator")),
@@ -217,7 +236,7 @@ class NcRemedialActionRowSource:
                                                  or alteration.get("GridStateAlteration.PropertyReference")),
                     grid_element_id=_text(alteration.get("RotatingMachineAction.RotatingMachine")),
                     normal_value=normal_value,
-                    direction=_enum_value(property_range.get("RangeConstraint.direction")).lower(),
+                    direction=direction,
                     value_kind=_enum_value(property_range.get("RangeConstraint.valueKind")).lower(),
                 ))
 

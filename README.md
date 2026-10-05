@@ -37,11 +37,15 @@ flowchart TD
 
 
 
-## Local redispatching CRAC builder
+## Costly remedial actions: local redispatching CRAC builder
 
-`rao/crac/redispatch` converts redispatching remedial actions (one UP and one DOWN `RotatingMachineAction`
+`rao/crac/costly_ra` holds the costly remedial actions. The generic CRAC helpers (assembly, merge, usage
+rules and limits, validation) are in `costly_ra/crac.py`, so countertrading can reuse them later; the
+redispatch mapping is in `costly_ra/redispatch.py`, and the MIN_COST run helpers are in `rao/costly_ra.py`.
+
+The redispatch builder converts redispatching remedial actions (one UP and one DOWN `RotatingMachineAction`
 per generating unit) into OpenRAO `injectionRangeActions`. The JSON CRAC it produces imports into
-pypowsybl 1.16.1 (OpenRAO 7.3.0), and `rao/redispatch.py` runs a MIN_COST RAO on it.
+pypowsybl 1.16.1 (OpenRAO 7.3.0), and `rao/costly_ra.py` runs a MIN_COST RAO on it.
 
 The remedial actions are retrieved the same way as for the topology actions: the NC RemedialAction profile
 (`RA`) from object storage, loaded into triplets with `pd.read_RDF`. Pmin, Pmax and availability are mapped
@@ -87,21 +91,21 @@ Mapping from the NC RemedialAction profile (`NcRemedialActionRowSource`):
 ### Command line
 
 ```bash
-build-rd-crac --ra-profile examples/redispatch/rd_remedial_actions.xml --costs examples/redispatch/costs.yaml \
+build-rd-crac --ra-profile examples/costly_ra/rd_remedial_actions.xml --costs examples/costly_ra/costs.yaml \
               [--base-crac crac.json] [--network model.xiidm] --out crac_out.json \
               [--instant curative] [--contingency CO_ID ...]
-build-rd-crac --rows examples/redispatch/rd_rows.csv ...      # RCC remedial-action export (CSV) instead
+build-rd-crac --rows examples/costly_ra/rd_rows.csv ...      # RCC remedial-action export (CSV) instead
 ```
 
-`build-rd-crac` is installed by `uv sync`; `python -m rao.crac.redispatch.cli` is equivalent. It prints the
+`build-rd-crac` is installed by `uv sync`; `python -m rao.crac.costly_ra.cli` is equivalent. It prints the
 actions written and the units skipped, with reasons. `--network` is optional and only used to check that
 OpenRAO imports the generated CRAC. With `--base-crac`, the actions are merged into an existing CRAC. With
 `--contingency`, `onContingencyStateUsageRules` are written instead of an `onInstantUsageRule`; this needs
 `--base-crac`, because the contingencies must exist.
 
 ```python
-from rao.crac.redispatch import CostConfig, NcRemedialActionRowSource, build_injection_range_actions, merge_into_crac, import_crac
-from rao.redispatch import load_min_cost_parameters, run_rao, redispatch_results, apply_redispatch
+from rao.crac.costly_ra import CostConfig, NcRemedialActionRowSource, build_injection_range_actions, merge_into_crac, import_crac
+from rao.costly_ra import load_min_cost_parameters, run_rao, redispatch_results, apply_redispatch
 
 rows = NcRemedialActionRowSource(pd.read_RDF(ra_profiles)).read()  # or CsvRowSource("export.csv").read()
 result = build_injection_range_actions(rows, costs=CostConfig.from_file("costs.yaml"))
@@ -130,10 +134,13 @@ alteration_type, alteration_name, property, grid_element_id, normal_value, direc
   set-point is the generator MW. The element id always gets a single leading `_`, like the other CRAC
   elements and the IIDM ids imported with `source-for-iidm-id = rdfID`.
 - UP `normalValue` = Pmax, DOWN `normalValue` = Pmin.
-- A missing UP or DOWN action means that direction is not offered. Its bound is opened (Pmax = +100000,
-  Pmin = −100000) with a warning, and the relative range then caps the set-point at its initial value. This
-  also works for units with negative output, such as pumped storage when pumping.
-- Units are skipped and reported for: no direction available, duplicate UP/DOWN actions, inconsistent
+- No min range in the remedial action list (no DOWN action, or a DOWN action without `StaticPropertyRange`
+  / `normalValue`): Pmin = 0, with a warning. Without a DOWN action, DOWN is not offered.
+- No max range (no UP action, or an UP action without a value): the unit is **left out of the CRAC** with a
+  warning, because the shift cannot be bounded.
+- A `RotatingMachineAction` without `StaticPropertyRange` takes its direction from the `_UP`/`_DOWN` suffix
+  of the RA name.
+- Units are also skipped and reported for: no direction available, duplicate UP/DOWN actions, inconsistent
   name/operator between UP and DOWN, Pmin > Pmax, or the same action id on two elements.
 - Usage rule: `onInstantUsageRules: [{"instant": "curative"}]` by default (configurable), or
   `onContingencyStateUsageRules` for a given contingency list.
@@ -160,7 +167,7 @@ Costs are **disabled by default**: without a cost config no `activationCost`/`va
 no cost warnings are logged. They are only needed for the MIN_COST objective. Costs are not part of the
 remedial action list. When enabled (`REDISPATCH_COSTS_PATH`, `CracBuilder(redispatch_costs=...)`,
 `build-rd-crac --costs` or `build_injection_range_actions(costs=...)`), they are loaded from YAML or JSON,
-keyed by unit action id (see `examples/redispatch/costs.yaml`):
+keyed by unit action id (see `examples/costly_ra/costs.yaml`):
 
 ```yaml
 defaults:
@@ -226,5 +233,5 @@ used by another range action. Everything else in the base CRAC is left untouched
     `max-ra-per-tso` is also set for the same TSO.
 - Multi-element (GSK-style) injection actions are out of scope; `redispatch_results` rejects them.
 
-Tests: `uv run pytest tests/test_redispatch_crac.py tests/test_redispatch_rao.py`. The TC1 CGMES round trip
+Tests: `uv run pytest tests/test_costly_ra_crac.py tests/test_costly_ra_rao.py`. The TC1 CGMES round trip
 needs the `test-data` submodule (`git submodule update --init test-data`) and is skipped without it.

@@ -3,10 +3,10 @@ import pandas as pd
 import pypowsybl
 import pytest
 from loguru import logger
-from rao.crac.redispatch.sources import RedispatchRow
+from rao.crac.costly_ra.sources import RedispatchRow
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-EXAMPLES_DIR = REPO_ROOT / "examples" / "redispatch"
+EXAMPLES_DIR = REPO_ROOT / "examples" / "costly_ra"
 TC1_CGMES = REPO_ROOT / "test-data" / "tests" / "test-data" / "TC1_CGMES.zip"
 
 
@@ -19,7 +19,7 @@ def log_messages():
     logger.remove(handler_id)
 
 
-def make_row(ra_name: str, element_id: str, direction: str, normal_value: float, available: bool = True,
+def make_row(ra_name: str, element_id: str, direction: str, normal_value: float | None, available: bool = True,
              party: str = "AST", kind: str = "curative", value_kind: str = "absolute",
              alteration_type: str = "RotatingMachineAction", property: str = "RotatingMachine.p") -> RedispatchRow:
     return RedispatchRow(kind=kind, ra_name=ra_name, available=available, area="Latvia", party=party,
@@ -108,12 +108,16 @@ EIC = "https://energy.referencedata.eu/EIC/"
 PROPERTY_REFERENCE = "https://energy.referencedata.eu/PropertyReference/"
 
 
-def nc_remedial_action(ra_name: str, machine_id: str, direction: str, normal_value: float, available: bool = True,
+def nc_remedial_action(ra_name: str, machine_id: str, direction: str, normal_value: float | None,
+                       available: bool = True,
                        enabled: bool = True, kind: str = "curative", operator: str = "10X1001A1001B54W",
                        property_name: str = "RotatingMachine.p", value_kind: str = "absolute") -> str:
-    """One GridStateAlterationRemedialAction with one RotatingMachineAction and one StaticPropertyRange."""
+    """
+    One GridStateAlterationRemedialAction with one RotatingMachineAction and one StaticPropertyRange
+    (no StaticPropertyRange when normal_value is None).
+    """
     key = ra_name.lower().replace("_", "-")
-    return f"""  <nc:GridStateAlterationRemedialAction rdf:ID="_ra-{key}">
+    action = f"""  <nc:GridStateAlterationRemedialAction rdf:ID="_ra-{key}">
     <cim:IdentifiedObject.mRID>ra-{key}</cim:IdentifiedObject.mRID>
     <cim:IdentifiedObject.name>{ra_name}</cim:IdentifiedObject.name>
     <nc:RemedialAction.kind rdf:resource="https://cim4.eu/ns/nc#RemedialActionKind.{kind}"/>
@@ -129,7 +133,10 @@ def nc_remedial_action(ra_name: str, machine_id: str, direction: str, normal_val
     <nc:GridStateAlteration.PropertyReference rdf:resource="{PROPERTY_REFERENCE}{property_name}"/>
     <nc:RotatingMachineAction.RotatingMachine rdf:resource="#_{machine_id.lstrip('_')}"/>
   </nc:RotatingMachineAction>
-  <nc:StaticPropertyRange rdf:ID="_spr-{key}">
+"""
+    if normal_value is None:
+        return action
+    return action + f"""  <nc:StaticPropertyRange rdf:ID="_spr-{key}">
     <cim:IdentifiedObject.mRID>spr-{key}</cim:IdentifiedObject.mRID>
     <nc:RangeConstraint.normalValue>{normal_value}</nc:RangeConstraint.normalValue>
     <nc:RangeConstraint.direction rdf:resource="https://cim4.eu/ns/nc#RelativeDirectionKind.{direction}"/>

@@ -1,7 +1,7 @@
 """
-MIN_COST RAO run helpers for local redispatching (pypowsybl 1.16.1 / OpenRAO 7.3.0).
+MIN_COST RAO run helpers for costly remedial actions (pypowsybl 1.16.1 / OpenRAO 7.3.0).
 
-The CRAC is built with rao.crac.redispatch. Known OpenRAO 7.3.0 requirements for MIN_COST:
+The CRAC is built with rao.crac.costly_ra. Known OpenRAO 7.3.0 requirements for MIN_COST:
     - 'costly-min-margin-parameters' must be set, otherwise the run fails
     - 'pst-model' must be APPROXIMATED_INTEGERS
     - pypowsybl's Python Parameters() object cannot set the costly block, so the
@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 import pypowsybl
 from loguru import logger
-from rao.crac.redispatch.builder import import_crac
+from rao.crac.costly_ra.crac import import_crac
 from rao.parameters.manager import RaoSettingsManager
 
 MIN_COST_PARAMETERS_PATH = Path(__file__).parent.joinpath("parameters", "rao_v34_min_cost.json")
