@@ -16,6 +16,7 @@ from common.config_parser import parse_app_properties
 from common.decorators import performance_counter
 from rao.crac.builder import CracBuilder
 from rao.crac.context import CracWorkaroundContext
+from rao.crac.redispatch import CostConfig
 from rao.parameters.manager import RaoSettingsManager
 from rao.parameters.manager import LoadflowSettingsManager
 from rao.optimizer import Optimizer
@@ -561,7 +562,9 @@ class HandlerVirtualOperator:
         # Create CRAC service
         logger.info(f"Loading network to triplets for CRAC service")
         network_triplets = pd.read_RDF(network_object)
-        crac_service = CracBuilder(data=input_files_data, network=network_triplets, workaround=workaround_ctx)
+        redispatch_costs = CostConfig.from_file(REDISPATCH_COSTS_PATH) if REDISPATCH_COSTS_PATH else None
+        crac_service = CracBuilder(data=input_files_data, network=network_triplets, workaround=workaround_ctx,
+                                   redispatch_costs=redispatch_costs)
         crac_service.get_limits()  # get limits from model and store in CRAC service object
 
         # Group by contingency id
@@ -572,7 +575,7 @@ class HandlerVirtualOperator:
             logger.info(f"Violations on network elements: {data['PowerFlowResult.EquipmentName'].to_list()}")
 
             # Build CRAC for each contingency
-            self.crac = crac_service.build_crac(contingency_ids=[mrid])
+            self.crac = crac_service.build_crac(contingency_ids=[mrid], include_redispatch=CRAC_INCLUDE_REDISPATCH)
 
             # For debugging
             with open("test-crac-3w-testing.json", "w") as f:

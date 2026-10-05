@@ -3,8 +3,12 @@ Input adapters for redispatching remedial-action rows.
 
 Every source converts its native format into a list of :class:`RedispatchRow` records,
 so the CRAC mapping in :mod:`rao.crac.redispatch.builder` does not depend on where the
-rows come from. CSV (RCC remedial-action export) is the first adapter; others (e.g. the
-NC/CSA RemedialAction XML profile) only need to implement :class:`RowSource`.
+rows come from:
+    - NcRemedialActionRowSource: NC RemedialAction profile (RA list from object storage),
+      loaded into triplets the same way as for the topology action CRAC building
+    - CsvRowSource / DataFrameRowSource: RCC remedial-action export
+Ranges and availability are taken from the remedial action list only, never from the
+network model.
 """
 from dataclasses import dataclass
 from pathlib import Path
@@ -116,4 +120,106 @@ class CsvRowSource(DataFrameRowSource):
     def read(self) -> list[RedispatchRow]:
         rows = super().read()
         logger.info(f"Read {len(rows)} remedial action rows from CSV: {getattr(self.source, 'name', self.source)}")
+        return rows
+
+
+def _enum_value(value) -> str:
+    """'https://cim4.eu/ns/nc#RelativeDirectionKind.up' or 'RelativeDirectionKind.up' -> 'up'"""
+    return str(value).split("#")[-1].split(".")[-1] if _present(value) else ""
+
+
+def _last_segment(value) -> str:
+    """'https://energy.referencedata.eu/PropertyReference/RotatingMachine.p' -> 'RotatingMachine.p'"""
+    return str(value).split("/")[-1] if _present(value) else ""
+
+
+def _present(value) -> bool:
+    return value is not None and not (isinstance(value, float) and pd.isna(value)) and value is not pd.NA
+
+
+def _text(value) -> str:
+    return str(value).strip() if _present(value) else ""
+
+
+class NcRemedialActionRowSource:
+    """
+    Reads redispatching rows from the NC RemedialAction profile loaded into triplets
+    (pd.read_RDF), as retrieved for the regular CRAC building.
+
+    One row is produced per RotatingMachineAction and StaticPropertyRange:
+        GridStateAlterationRemedialAction  -> ra_name, kind, party, available (normalAvailable)
+        RotatingMachineAction              -> alteration_name, grid_element_id (RotatingMachine),
+                                              available (normalEnabled)
+        StaticPropertyRange                -> property, normal_value, direction, value_kind
+    """
+
+    def __init__(self, data: pd.DataFrame):
+        self.data = data
+
+    def _table(self, object_type: str) -> pd.DataFrame:
+        try:
+            table = self.data.type_tableview(object_type, string_to_number=False)
+        except Exception:
+            table = None
+        if table is None or table.empty:
+            return pd.DataFrame()
+        return table
+
+    def read(self) -> list[RedispatchRow]:
+        remedial_actions = self._table("GridStateAlterationRemedialAction")
+        alterations = self._table("RotatingMachineAction")
+        ranges = self._table("StaticPropertyRange")
+        if alterations.empty:
+            logger.info("No RotatingMachineAction found in remedial action data")
+            return []
+
+        ranges_by_alteration = {}
+        if "RangeConstraint.GridStateAlteration" in ranges.columns:
+            for record in ranges.to_dict("records"):
+                ranges_by_alteration.setdefault(record["RangeConstraint.GridStateAlteration"], []).append(record)
+        remedial_actions = remedial_actions.to_dict("index")
+
+        rows = []
+        for alteration_id, alteration in alterations.to_dict("index").items():
+            name = _text(alteration.get("IdentifiedObject.name")) or alteration_id
+            remedial_action = remedial_actions.get(alteration.get("GridStateAlteration.GridStateAlterationRemedialAction"))
+            if remedial_action is None:
+                logger.warning(f"RotatingMachineAction {name} has no GridStateAlterationRemedialAction, ignored")
+                continue
+            if not _text(alteration.get("RotatingMachineAction.RotatingMachine")):
+                logger.warning(f"RotatingMachineAction {name} has no RotatingMachine, ignored")
+                continue
+            alteration_ranges = ranges_by_alteration.get(alteration_id, [])
+            if not alteration_ranges:
+                logger.warning(f"RotatingMachineAction {name} has no StaticPropertyRange, ignored")
+                continue
+
+            # Missing flags are treated as true, as in the profile defaults
+            available = (_text(remedial_action.get("RemedialAction.normalAvailable")).lower() != "false"
+                         and _text(alteration.get("GridStateAlteration.normalEnabled")).lower() != "false")
+
+            for property_range in alteration_ranges:
+                normal_value = property_range.get("RangeConstraint.normalValue")
+                try:
+                    normal_value = float(normal_value)
+                except (TypeError, ValueError):
+                    raise RowParseError(f"RotatingMachineAction {name}: invalid StaticPropertyRange normalValue "
+                                        f"'{normal_value}'") from None
+                rows.append(RedispatchRow(
+                    kind=_enum_value(remedial_action.get("RemedialAction.kind")),
+                    ra_name=_text(remedial_action.get("IdentifiedObject.name")),
+                    available=available,
+                    area=_last_segment(remedial_action.get("RemedialAction.AppointedToRegion")),
+                    party=_text(remedial_action.get("RemedialAction.RemedialActionSystemOperator")),
+                    alteration_type="RotatingMachineAction",
+                    alteration_name=name,
+                    property=_last_segment(property_range.get("StaticPropertyRange.PropertyReference")
+                                                 or alteration.get("GridStateAlteration.PropertyReference")),
+                    grid_element_id=_text(alteration.get("RotatingMachineAction.RotatingMachine")),
+                    normal_value=normal_value,
+                    direction=_enum_value(property_range.get("RangeConstraint.direction")).lower(),
+                    value_kind=_enum_value(property_range.get("RangeConstraint.valueKind")).lower(),
+                ))
+
+        logger.info(f"Read {len(rows)} RotatingMachineAction range rows from remedial action data")
         return rows

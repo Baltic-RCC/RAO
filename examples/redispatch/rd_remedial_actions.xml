@@ -1,0 +1,153 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:cim="https://cim.ucaiug.io/ns#"
+         xmlns:nc="https://cim4.eu/ns/nc#" xmlns:md="http://iec.ch/TC57/61970-552/ModelDescription/1#"
+         xmlns:dcat="http://www.w3.org/ns/dcat#">
+  <md:FullModel rdf:about="urn:uuid:00000000-0000-0000-0000-000000000001">
+    <md:Model.description>Instance of RemedialAction profile</md:Model.description>
+    <dcat:keyword>RA</dcat:keyword>
+  </md:FullModel>
+  <nc:GridStateAlterationRemedialAction rdf:ID="_ra-ra-rd-khes-g5-up">
+    <cim:IdentifiedObject.mRID>ra-ra-rd-khes-g5-up</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>RA_RD_KHES_G5_UP</cim:IdentifiedObject.name>
+    <nc:RemedialAction.kind rdf:resource="https://cim4.eu/ns/nc#RemedialActionKind.curative"/>
+    <nc:RemedialAction.normalAvailable>true</nc:RemedialAction.normalAvailable>
+    <nc:RemedialAction.AppointedToRegion rdf:resource="https://energy.referencedata.eu/EIC/10Y1001C--00059P"/>
+    <nc:RemedialAction.RemedialActionSystemOperator rdf:resource="https://energy.referencedata.eu/EIC/10X1001A1001B54W"/>
+  </nc:GridStateAlterationRemedialAction>
+  <nc:RotatingMachineAction rdf:ID="_alt-ra-rd-khes-g5-up">
+    <cim:IdentifiedObject.mRID>alt-ra-rd-khes-g5-up</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>RD_KHES_G5_UP</cim:IdentifiedObject.name>
+    <nc:GridStateAlteration.normalEnabled>true</nc:GridStateAlteration.normalEnabled>
+    <nc:GridStateAlteration.GridStateAlterationRemedialAction rdf:resource="#_ra-ra-rd-khes-g5-up"/>
+    <nc:GridStateAlteration.PropertyReference rdf:resource="https://energy.referencedata.eu/PropertyReference/RotatingMachine.p"/>
+    <nc:RotatingMachineAction.RotatingMachine rdf:resource="#_f157276b-ba01-4a30-a510-d5939c71018b"/>
+  </nc:RotatingMachineAction>
+  <nc:StaticPropertyRange rdf:ID="_spr-ra-rd-khes-g5-up">
+    <cim:IdentifiedObject.mRID>spr-ra-rd-khes-g5-up</cim:IdentifiedObject.mRID>
+    <nc:RangeConstraint.normalValue>56.0</nc:RangeConstraint.normalValue>
+    <nc:RangeConstraint.direction rdf:resource="https://cim4.eu/ns/nc#RelativeDirectionKind.up"/>
+    <nc:RangeConstraint.valueKind rdf:resource="https://cim4.eu/ns/nc#ValueOffsetKind.absolute"/>
+    <nc:RangeConstraint.GridStateAlteration rdf:resource="#_alt-ra-rd-khes-g5-up"/>
+    <nc:StaticPropertyRange.PropertyReference rdf:resource="https://energy.referencedata.eu/PropertyReference/RotatingMachine.p"/>
+  </nc:StaticPropertyRange>
+  <nc:GridStateAlterationRemedialAction rdf:ID="_ra-ra-rd-khes-g5-down">
+    <cim:IdentifiedObject.mRID>ra-ra-rd-khes-g5-down</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>RA_RD_KHES_G5_DOWN</cim:IdentifiedObject.name>
+    <nc:RemedialAction.kind rdf:resource="https://cim4.eu/ns/nc#RemedialActionKind.curative"/>
+    <nc:RemedialAction.normalAvailable>true</nc:RemedialAction.normalAvailable>
+    <nc:RemedialAction.AppointedToRegion rdf:resource="https://energy.referencedata.eu/EIC/10Y1001C--00059P"/>
+    <nc:RemedialAction.RemedialActionSystemOperator rdf:resource="https://energy.referencedata.eu/EIC/10X1001A1001B54W"/>
+  </nc:GridStateAlterationRemedialAction>
+  <nc:RotatingMachineAction rdf:ID="_alt-ra-rd-khes-g5-down">
+    <cim:IdentifiedObject.mRID>alt-ra-rd-khes-g5-down</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>RD_KHES_G5_DOWN</cim:IdentifiedObject.name>
+    <nc:GridStateAlteration.normalEnabled>true</nc:GridStateAlteration.normalEnabled>
+    <nc:GridStateAlteration.GridStateAlterationRemedialAction rdf:resource="#_ra-ra-rd-khes-g5-down"/>
+    <nc:GridStateAlteration.PropertyReference rdf:resource="https://energy.referencedata.eu/PropertyReference/RotatingMachine.p"/>
+    <nc:RotatingMachineAction.RotatingMachine rdf:resource="#_f157276b-ba01-4a30-a510-d5939c71018b"/>
+  </nc:RotatingMachineAction>
+  <nc:StaticPropertyRange rdf:ID="_spr-ra-rd-khes-g5-down">
+    <cim:IdentifiedObject.mRID>spr-ra-rd-khes-g5-down</cim:IdentifiedObject.mRID>
+    <nc:RangeConstraint.normalValue>0.0</nc:RangeConstraint.normalValue>
+    <nc:RangeConstraint.direction rdf:resource="https://cim4.eu/ns/nc#RelativeDirectionKind.down"/>
+    <nc:RangeConstraint.valueKind rdf:resource="https://cim4.eu/ns/nc#ValueOffsetKind.absolute"/>
+    <nc:RangeConstraint.GridStateAlteration rdf:resource="#_alt-ra-rd-khes-g5-down"/>
+    <nc:StaticPropertyRange.PropertyReference rdf:resource="https://energy.referencedata.eu/PropertyReference/RotatingMachine.p"/>
+  </nc:StaticPropertyRange>
+  <nc:GridStateAlterationRemedialAction rdf:ID="_ra-ra-rd-phes-g1-up">
+    <cim:IdentifiedObject.mRID>ra-ra-rd-phes-g1-up</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>RA_RD_PHES_G1_UP</cim:IdentifiedObject.name>
+    <nc:RemedialAction.kind rdf:resource="https://cim4.eu/ns/nc#RemedialActionKind.curative"/>
+    <nc:RemedialAction.normalAvailable>true</nc:RemedialAction.normalAvailable>
+    <nc:RemedialAction.AppointedToRegion rdf:resource="https://energy.referencedata.eu/EIC/10Y1001C--00059P"/>
+    <nc:RemedialAction.RemedialActionSystemOperator rdf:resource="https://energy.referencedata.eu/EIC/10X1001A1001B54W"/>
+  </nc:GridStateAlterationRemedialAction>
+  <nc:RotatingMachineAction rdf:ID="_alt-ra-rd-phes-g1-up">
+    <cim:IdentifiedObject.mRID>alt-ra-rd-phes-g1-up</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>RD_PHES_G1_UP</cim:IdentifiedObject.name>
+    <nc:GridStateAlteration.normalEnabled>true</nc:GridStateAlteration.normalEnabled>
+    <nc:GridStateAlteration.GridStateAlterationRemedialAction rdf:resource="#_ra-ra-rd-phes-g1-up"/>
+    <nc:GridStateAlteration.PropertyReference rdf:resource="https://energy.referencedata.eu/PropertyReference/RotatingMachine.p"/>
+    <nc:RotatingMachineAction.RotatingMachine rdf:resource="#_a1c42d01-ba01-4def-bae4-37bea73d2960"/>
+  </nc:RotatingMachineAction>
+  <nc:StaticPropertyRange rdf:ID="_spr-ra-rd-phes-g1-up">
+    <cim:IdentifiedObject.mRID>spr-ra-rd-phes-g1-up</cim:IdentifiedObject.mRID>
+    <nc:RangeConstraint.normalValue>98.0</nc:RangeConstraint.normalValue>
+    <nc:RangeConstraint.direction rdf:resource="https://cim4.eu/ns/nc#RelativeDirectionKind.up"/>
+    <nc:RangeConstraint.valueKind rdf:resource="https://cim4.eu/ns/nc#ValueOffsetKind.absolute"/>
+    <nc:RangeConstraint.GridStateAlteration rdf:resource="#_alt-ra-rd-phes-g1-up"/>
+    <nc:StaticPropertyRange.PropertyReference rdf:resource="https://energy.referencedata.eu/PropertyReference/RotatingMachine.p"/>
+  </nc:StaticPropertyRange>
+  <nc:GridStateAlterationRemedialAction rdf:ID="_ra-ra-rd-phes-g1-down">
+    <cim:IdentifiedObject.mRID>ra-ra-rd-phes-g1-down</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>RA_RD_PHES_G1_DOWN</cim:IdentifiedObject.name>
+    <nc:RemedialAction.kind rdf:resource="https://cim4.eu/ns/nc#RemedialActionKind.curative"/>
+    <nc:RemedialAction.normalAvailable>true</nc:RemedialAction.normalAvailable>
+    <nc:RemedialAction.AppointedToRegion rdf:resource="https://energy.referencedata.eu/EIC/10Y1001C--00059P"/>
+    <nc:RemedialAction.RemedialActionSystemOperator rdf:resource="https://energy.referencedata.eu/EIC/10X1001A1001B54W"/>
+  </nc:GridStateAlterationRemedialAction>
+  <nc:RotatingMachineAction rdf:ID="_alt-ra-rd-phes-g1-down">
+    <cim:IdentifiedObject.mRID>alt-ra-rd-phes-g1-down</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>RD_PHES_G1_DOWN</cim:IdentifiedObject.name>
+    <nc:GridStateAlteration.normalEnabled>true</nc:GridStateAlteration.normalEnabled>
+    <nc:GridStateAlteration.GridStateAlterationRemedialAction rdf:resource="#_ra-ra-rd-phes-g1-down"/>
+    <nc:GridStateAlteration.PropertyReference rdf:resource="https://energy.referencedata.eu/PropertyReference/RotatingMachine.p"/>
+    <nc:RotatingMachineAction.RotatingMachine rdf:resource="#_a1c42d01-ba01-4def-bae4-37bea73d2960"/>
+  </nc:RotatingMachineAction>
+  <nc:StaticPropertyRange rdf:ID="_spr-ra-rd-phes-g1-down">
+    <cim:IdentifiedObject.mRID>spr-ra-rd-phes-g1-down</cim:IdentifiedObject.mRID>
+    <nc:RangeConstraint.normalValue>0.0</nc:RangeConstraint.normalValue>
+    <nc:RangeConstraint.direction rdf:resource="https://cim4.eu/ns/nc#RelativeDirectionKind.down"/>
+    <nc:RangeConstraint.valueKind rdf:resource="https://cim4.eu/ns/nc#ValueOffsetKind.absolute"/>
+    <nc:RangeConstraint.GridStateAlteration rdf:resource="#_alt-ra-rd-phes-g1-down"/>
+    <nc:StaticPropertyRange.PropertyReference rdf:resource="https://energy.referencedata.eu/PropertyReference/RotatingMachine.p"/>
+  </nc:StaticPropertyRange>
+  <nc:GridStateAlterationRemedialAction rdf:ID="_ra-ra-rd-phes-g3-up">
+    <cim:IdentifiedObject.mRID>ra-ra-rd-phes-g3-up</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>RA_RD_PHES_G3_UP</cim:IdentifiedObject.name>
+    <nc:RemedialAction.kind rdf:resource="https://cim4.eu/ns/nc#RemedialActionKind.curative"/>
+    <nc:RemedialAction.normalAvailable>false</nc:RemedialAction.normalAvailable>
+    <nc:RemedialAction.AppointedToRegion rdf:resource="https://energy.referencedata.eu/EIC/10Y1001C--00059P"/>
+    <nc:RemedialAction.RemedialActionSystemOperator rdf:resource="https://energy.referencedata.eu/EIC/10X1001A1001B54W"/>
+  </nc:GridStateAlterationRemedialAction>
+  <nc:RotatingMachineAction rdf:ID="_alt-ra-rd-phes-g3-up">
+    <cim:IdentifiedObject.mRID>alt-ra-rd-phes-g3-up</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>RD_PHES_G3_UP</cim:IdentifiedObject.name>
+    <nc:GridStateAlteration.normalEnabled>true</nc:GridStateAlteration.normalEnabled>
+    <nc:GridStateAlteration.GridStateAlterationRemedialAction rdf:resource="#_ra-ra-rd-phes-g3-up"/>
+    <nc:GridStateAlteration.PropertyReference rdf:resource="https://energy.referencedata.eu/PropertyReference/RotatingMachine.p"/>
+    <nc:RotatingMachineAction.RotatingMachine rdf:resource="#_4df6a958-ba01-40ca-bcdc-c71e464681df"/>
+  </nc:RotatingMachineAction>
+  <nc:StaticPropertyRange rdf:ID="_spr-ra-rd-phes-g3-up">
+    <cim:IdentifiedObject.mRID>spr-ra-rd-phes-g3-up</cim:IdentifiedObject.mRID>
+    <nc:RangeConstraint.normalValue>97.0</nc:RangeConstraint.normalValue>
+    <nc:RangeConstraint.direction rdf:resource="https://cim4.eu/ns/nc#RelativeDirectionKind.up"/>
+    <nc:RangeConstraint.valueKind rdf:resource="https://cim4.eu/ns/nc#ValueOffsetKind.absolute"/>
+    <nc:RangeConstraint.GridStateAlteration rdf:resource="#_alt-ra-rd-phes-g3-up"/>
+    <nc:StaticPropertyRange.PropertyReference rdf:resource="https://energy.referencedata.eu/PropertyReference/RotatingMachine.p"/>
+  </nc:StaticPropertyRange>
+  <nc:GridStateAlterationRemedialAction rdf:ID="_ra-ra-rd-phes-g3-down">
+    <cim:IdentifiedObject.mRID>ra-ra-rd-phes-g3-down</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>RA_RD_PHES_G3_DOWN</cim:IdentifiedObject.name>
+    <nc:RemedialAction.kind rdf:resource="https://cim4.eu/ns/nc#RemedialActionKind.curative"/>
+    <nc:RemedialAction.normalAvailable>false</nc:RemedialAction.normalAvailable>
+    <nc:RemedialAction.AppointedToRegion rdf:resource="https://energy.referencedata.eu/EIC/10Y1001C--00059P"/>
+    <nc:RemedialAction.RemedialActionSystemOperator rdf:resource="https://energy.referencedata.eu/EIC/10X1001A1001B54W"/>
+  </nc:GridStateAlterationRemedialAction>
+  <nc:RotatingMachineAction rdf:ID="_alt-ra-rd-phes-g3-down">
+    <cim:IdentifiedObject.mRID>alt-ra-rd-phes-g3-down</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>RD_PHES_G3_DOWN</cim:IdentifiedObject.name>
+    <nc:GridStateAlteration.normalEnabled>true</nc:GridStateAlteration.normalEnabled>
+    <nc:GridStateAlteration.GridStateAlterationRemedialAction rdf:resource="#_ra-ra-rd-phes-g3-down"/>
+    <nc:GridStateAlteration.PropertyReference rdf:resource="https://energy.referencedata.eu/PropertyReference/RotatingMachine.p"/>
+    <nc:RotatingMachineAction.RotatingMachine rdf:resource="#_4df6a958-ba01-40ca-bcdc-c71e464681df"/>
+  </nc:RotatingMachineAction>
+  <nc:StaticPropertyRange rdf:ID="_spr-ra-rd-phes-g3-down">
+    <cim:IdentifiedObject.mRID>spr-ra-rd-phes-g3-down</cim:IdentifiedObject.mRID>
+    <nc:RangeConstraint.normalValue>0.0</nc:RangeConstraint.normalValue>
+    <nc:RangeConstraint.direction rdf:resource="https://cim4.eu/ns/nc#RelativeDirectionKind.down"/>
+    <nc:RangeConstraint.valueKind rdf:resource="https://cim4.eu/ns/nc#ValueOffsetKind.absolute"/>
+    <nc:RangeConstraint.GridStateAlteration rdf:resource="#_alt-ra-rd-phes-g3-down"/>
+    <nc:StaticPropertyRange.PropertyReference rdf:resource="https://energy.referencedata.eu/PropertyReference/RotatingMachine.p"/>
+  </nc:StaticPropertyRange>
+</rdf:RDF>

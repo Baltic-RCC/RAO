@@ -91,5 +91,68 @@ def triangle_network(parallel_l13: bool = False) -> pypowsybl.network.Network:
     else:
         lines = [("L12", "B1", "B2", 10.0), ("L13", "B1", "B3", 10.0), ("L23", "B2", "B3", 10.0)]
     return create_network(lines=lines,
-                          generators=[("GEN_A", "B1", 0.0, 500.0, 400.0), ("GEN_B", "B2", 0.0, 800.0, 400.0)],
+                          generators=[("_GEN_A", "B1", 0.0, 500.0, 400.0), ("_GEN_B", "B2", 0.0, 800.0, 400.0)],
                           loads=[("LOAD", "B3", 800.0)])
+
+
+NC_HEADER = """<?xml version='1.0' encoding='UTF-8'?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:cim="https://cim.ucaiug.io/ns#"
+         xmlns:nc="https://cim4.eu/ns/nc#" xmlns:md="http://iec.ch/TC57/61970-552/ModelDescription/1#"
+         xmlns:dcat="http://www.w3.org/ns/dcat#">
+  <md:FullModel rdf:about="urn:uuid:00000000-0000-0000-0000-000000000001">
+    <md:Model.description>Instance of RemedialAction profile</md:Model.description>
+    <dcat:keyword>RA</dcat:keyword>
+  </md:FullModel>
+"""
+EIC = "https://energy.referencedata.eu/EIC/"
+PROPERTY_REFERENCE = "https://energy.referencedata.eu/PropertyReference/"
+
+
+def nc_remedial_action(ra_name: str, machine_id: str, direction: str, normal_value: float, available: bool = True,
+                       enabled: bool = True, kind: str = "curative", operator: str = "10X1001A1001B54W",
+                       property_name: str = "RotatingMachine.p", value_kind: str = "absolute") -> str:
+    """One GridStateAlterationRemedialAction with one RotatingMachineAction and one StaticPropertyRange."""
+    key = ra_name.lower().replace("_", "-")
+    return f"""  <nc:GridStateAlterationRemedialAction rdf:ID="_ra-{key}">
+    <cim:IdentifiedObject.mRID>ra-{key}</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>{ra_name}</cim:IdentifiedObject.name>
+    <nc:RemedialAction.kind rdf:resource="https://cim4.eu/ns/nc#RemedialActionKind.{kind}"/>
+    <nc:RemedialAction.normalAvailable>{str(available).lower()}</nc:RemedialAction.normalAvailable>
+    <nc:RemedialAction.AppointedToRegion rdf:resource="{EIC}10Y1001C--00059P"/>
+    <nc:RemedialAction.RemedialActionSystemOperator rdf:resource="{EIC}{operator}"/>
+  </nc:GridStateAlterationRemedialAction>
+  <nc:RotatingMachineAction rdf:ID="_alt-{key}">
+    <cim:IdentifiedObject.mRID>alt-{key}</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>{ra_name.removeprefix("RA_")}</cim:IdentifiedObject.name>
+    <nc:GridStateAlteration.normalEnabled>{str(enabled).lower()}</nc:GridStateAlteration.normalEnabled>
+    <nc:GridStateAlteration.GridStateAlterationRemedialAction rdf:resource="#_ra-{key}"/>
+    <nc:GridStateAlteration.PropertyReference rdf:resource="{PROPERTY_REFERENCE}{property_name}"/>
+    <nc:RotatingMachineAction.RotatingMachine rdf:resource="#_{machine_id.lstrip('_')}"/>
+  </nc:RotatingMachineAction>
+  <nc:StaticPropertyRange rdf:ID="_spr-{key}">
+    <cim:IdentifiedObject.mRID>spr-{key}</cim:IdentifiedObject.mRID>
+    <nc:RangeConstraint.normalValue>{normal_value}</nc:RangeConstraint.normalValue>
+    <nc:RangeConstraint.direction rdf:resource="https://cim4.eu/ns/nc#RelativeDirectionKind.{direction}"/>
+    <nc:RangeConstraint.valueKind rdf:resource="https://cim4.eu/ns/nc#ValueOffsetKind.{value_kind}"/>
+    <nc:RangeConstraint.GridStateAlteration rdf:resource="#_alt-{key}"/>
+    <nc:StaticPropertyRange.PropertyReference rdf:resource="{PROPERTY_REFERENCE}{property_name}"/>
+  </nc:StaticPropertyRange>
+"""
+
+
+def nc_unit(unit: str, machine_id: str, p_min: float, p_max: float, up: bool = True, down: bool = True,
+            **kwargs) -> str:
+    """UP and DOWN remedial actions of one unit."""
+    return (nc_remedial_action(f"{unit}_UP", machine_id, "up", p_max, available=up, **kwargs)
+            + nc_remedial_action(f"{unit}_DOWN", machine_id, "down", p_min, available=down, **kwargs))
+
+
+def nc_profile(*remedial_actions: str) -> str:
+    return NC_HEADER + "".join(remedial_actions) + "</rdf:RDF>\n"
+
+
+def read_nc_profile(*remedial_actions: str, tmp_path: Path) -> pd.DataFrame:
+    """NC RemedialAction profile loaded into triplets, as in the CRAC building process."""
+    path = tmp_path / "remedial_actions.xml"
+    path.write_text(nc_profile(*remedial_actions), encoding="utf-8")
+    return pd.read_RDF([str(path)])

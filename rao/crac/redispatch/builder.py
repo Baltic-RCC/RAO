@@ -10,12 +10,15 @@ RotatingMachineAction with direction 'none' as a fixed set-point network action,
 up/down ranges would not become range actions.
 
 Mapping rules:
+    - rows come from the remedial action list (NC RemedialAction profile or RCC export), Pmin,
+      Pmax and availability are mapped from it only, the network model is never read
     - only RotatingMachineAction rows on RotatingMachine.p are processed,
       value_kind must be 'absolute'
     - rows are grouped per grid element, ONE InjectionRangeAction is emitted per unit
       (OpenRAO does not allow two range actions on the same element)
     - action id = ra_name without the _UP/_DOWN suffix, operator = party
-    - networkElementIdsAndKeys = {element: 1.0}, so the set-point is the generator MW
+    - networkElementIdsAndKeys = {_<element>: 1.0}, so the set-point is the generator MW; the id
+      gets a single leading '_' like all CRAC elements (IIDM ids follow the CGMES rdf:ID)
     - UP normal_value = Pmax, DOWN normal_value = Pmin
     - availability is expressed as intersected ranges (see _ranges())
 """
@@ -25,7 +28,6 @@ from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from io import BytesIO
-import pandas as pd
 import pypowsybl
 from loguru import logger
 from rao.crac import models
@@ -119,19 +121,12 @@ def unit_action_id(ra_name: str) -> str:
     return ra_name
 
 
-def _id_candidates(element_id: str) -> list[str]:
-    # CGMES rdf:IDs may or may not keep the leading '_' after the IIDM import
-    stripped = element_id.lstrip("_")
-    return list(dict.fromkeys([element_id, stripped, f"_{stripped}"]))
-
-
-def resolve_generator_id(element_id: str, generator_ids: Iterable[str]) -> str | None:
-    """Return the network generator id matching element_id with or without leading '_'."""
-    ids = generator_ids if isinstance(generator_ids, (set, frozenset, pd.Index)) else set(generator_ids)
-    for candidate in _id_candidates(element_id):
-        if candidate in ids:
-            return candidate
-    return None
+def normalize_element_id(element_id: str) -> str:
+    """
+    Single leading '_', as the IIDM ids imported from CGMES with rdf:ID ('source-for-iidm-id')
+    and as the other CRAC elements are written: 'f157...' / '_f157...' / '__f157...' -> '_f157...'
+    """
+    return f"_{element_id.lstrip('_')}"
 
 
 def _ranges(p_min: float, p_max: float, up_available: bool, down_available: bool) -> list[models.InjectionRange]:
@@ -166,7 +161,6 @@ def _is_redispatch_row(row: RedispatchRow) -> bool:
 
 def build_injection_range_actions(rows: Iterable[RedispatchRow],
                                   costs: CostConfig | None = None,
-                                  network: pypowsybl.network.Network | None = None,
                                   instant: str = DEFAULT_INSTANT,
                                   contingency_ids: list[str] | None = None) -> RedispatchBuildResult:
     """
@@ -175,8 +169,6 @@ def build_injection_range_actions(rows: Iterable[RedispatchRow],
     Args:
         rows: typed rows from any RowSource
         costs: cost configuration, built-in defaults are used if not given
-        network: if given, element ids are resolved against its generators and missing
-            UP/DOWN rows fall back to the generator max_p/min_p
         instant: instant of the usage rule (default 'curative')
         contingency_ids: if given, onContingencyStateUsageRules for these contingencies
             are emitted instead of an onInstantUsageRule
@@ -200,11 +192,6 @@ def build_injection_range_actions(rows: Iterable[RedispatchRow],
         raise ValueError(f"Only value_kind '{ABSOLUTE_VALUE_KIND}' is supported for redispatching rows, "
                          f"got other value kinds for: {invalid}")
 
-    generators = network.get_generators(attributes=["min_p", "max_p", "target_p"]) if network is not None else None
-    if generators is None:
-        logger.warning("No network given, element ids are not validated and missing UP/DOWN rows "
-                       "fall back to Pmin = 0 / Pmax = BIG")
-
     # Group per unit; ids with and without leading '_' denote the same element
     groups: dict[str, list[RedispatchRow]] = {}
     for row in relevant:
@@ -212,7 +199,7 @@ def build_injection_range_actions(rows: Iterable[RedispatchRow],
 
     actions = []
     for unit_rows in groups.values():
-        action = _build_unit_action(unit_rows, costs, generators, instant, contingency_ids, result)
+        action = _build_unit_action(unit_rows, costs, instant, contingency_ids, result)
         if action is not None:
             actions.append(action)
 
@@ -236,13 +223,12 @@ def _skip(result: RedispatchBuildResult, unit_id: str, element_id: str, reason: 
 
 def _build_unit_action(rows: list[RedispatchRow],
                        costs: CostConfig,
-                       generators: pd.DataFrame | None,
                        instant: str,
                        contingency_ids: list[str] | None,
                        result: RedispatchBuildResult) -> models.InjectionRangeAction | None:
     up_rows = [row for row in rows if row.direction == DIRECTION_UP]
     down_rows = [row for row in rows if row.direction == DIRECTION_DOWN]
-    element_id = rows[0].grid_element_id
+    element_id = normalize_element_id(rows[0].grid_element_id)
     unit_ids = sorted({unit_action_id(row.ra_name) for row in rows})
     unit_id = unit_ids[0]
 
@@ -263,36 +249,20 @@ def _build_unit_action(rows: list[RedispatchRow],
     up_row = up_rows[0] if up_rows else None
     down_row = down_rows[0] if down_rows else None
 
-    # Resolve the element against network generators
-    generator = None
-    if generators is not None:
-        network_id = resolve_generator_id(element_id, generators.index)
-        if network_id is None:
-            _skip(result, unit_id, element_id, "grid element not found among network generators")
-            return None
-        if network_id != element_id:
-            logger.debug(f"Redispatch unit {unit_id}: element id {element_id} resolved to {network_id}")
-        element_id = network_id
-        generator = generators.loc[network_id]
-
-    # UP row normal value is Pmax, DOWN row normal value is Pmin
+    # UP row normal value is Pmax, DOWN row normal value is Pmin. A missing row means that
+    # direction is not offered: its bound is opened to BIG, the relative range added below
+    # then caps the set-point at its initial value (works for negative output, e.g. pumping).
     if up_row is not None:
         p_max = up_row.normal_value
-    elif generator is not None:
-        p_max = float(generator["max_p"])
-        logger.warning(f"Redispatch unit {unit_id}: UP row missing, using network max_p = {p_max} as Pmax")
     else:
         p_max = BIG
-        logger.warning(f"Redispatch unit {unit_id}: UP row missing and no network given, using Pmax = {BIG}")
+        logger.warning(f"Redispatch unit {unit_id}: UP row missing, UP not offered, using Pmax = {BIG}")
 
     if down_row is not None:
         p_min = down_row.normal_value
-    elif generator is not None:
-        p_min = float(generator["min_p"])
-        logger.warning(f"Redispatch unit {unit_id}: DOWN row missing, using network min_p = {p_min} as Pmin")
     else:
-        p_min = 0.0
-        logger.warning(f"Redispatch unit {unit_id}: DOWN row missing and no network given, using Pmin = 0")
+        p_min = -BIG
+        logger.warning(f"Redispatch unit {unit_id}: DOWN row missing, DOWN not offered, using Pmin = {-BIG}")
 
     if p_min > p_max:
         _skip(result, unit_id, element_id, f"Pmin {p_min} is greater than Pmax {p_max}")
@@ -455,7 +425,7 @@ def validate_crac(network: pypowsybl.network.Network, crac: dict):
     """
     Import the CRAC with OpenRAO and check its injection range actions and ranges.
 
-    Also warns if a unit's initial set-point lies outside its absolute [Pmin, Pmax].
+    This is an import check only, ranges are not checked against the network model.
     Returns the imported pypowsybl Crac object.
     """
     imported = import_crac(network, crac)
@@ -477,13 +447,6 @@ def validate_crac(network: pypowsybl.network.Network, crac: dict):
                 e[0] != i[0] or abs(e[1] - i[1]) > 1e-6 or abs(e[2] - i[2]) > 1e-6
                 for e, i in zip(expected_ranges, imported_ranges)):
             raise CracValidationError(f"Action {action_id}: imported ranges {imported_ranges} differ from {expected_ranges}")
-
-        absolute = [r for r in action["ranges"] if r["rangeType"] == "absolute"]
-        initial = injection_actions.loc[action_id, "initial_set_point"]
-        for r in absolute:
-            if not r["min"] <= initial <= r["max"]:
-                logger.warning(f"Action {action_id}: initial set-point {initial} MW lies outside its absolute "
-                               f"range [{r['min']}, {r['max']}]")
 
     logger.info(f"CRAC validated by OpenRAO import: {len(expected)} injection range actions")
     return imported

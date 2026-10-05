@@ -65,7 +65,8 @@ def parse_app_properties(caller_globals: Dict[str, Any],
         if eval_types:
             try:
                 parameter_value = ast.literal_eval(parameter_value)
-            except ValueError:
+            except (ValueError, SyntaxError):
+                # Not a Python literal (e.g. an absolute path), keep as string
                 pass
 
         # Assign value to globals with upper letters

@@ -7,6 +7,7 @@ from rao.crac import models
 import json
 from common.decorators import performance_counter
 from rao.crac.context import CracWorkaroundContext
+from rao.crac.redispatch import CostConfig, NcRemedialActionRowSource, build_injection_range_actions
 
 
 class CracBuilder:
@@ -21,13 +22,15 @@ class CracBuilder:
     MIN_MONITORED_NOMINAL_VOLTAGE_KV = 330.0
     EXCLUDED_MODEL_AUTHORS = ()
 
-    def __init__(self, data: pd.DataFrame, network: pd.DataFrame | None, workaround: CracWorkaroundContext | None = None):
+    def __init__(self, data: pd.DataFrame, network: pd.DataFrame | None, workaround: CracWorkaroundContext | None = None,
+                 redispatch_costs: CostConfig | None = None):
         logger.info(f"CRAC builder initialized")
         self.data = data
         self.network = network
         self.limits = None
         self._crac = None
         self.workaround = workaround or CracWorkaroundContext()
+        self.redispatch_costs = redispatch_costs
 
         # BaseVoltage nominal voltages live in the EQ boundary file, capture them before it is excluded
         self.base_voltages = {}
@@ -1133,6 +1136,22 @@ class CracBuilder:
                 opposite_network_action = network_action.model_copy(update=_updates)
                 self._crac.networkActions.append(opposite_network_action)
 
+    def process_redispatch_actions(self, instant: str = "curative"):
+        """
+        Redispatching RotatingMachineAction remedial actions -> one InjectionRangeAction per unit.
+
+        Retrieved from the same remedial action data (NC RemedialAction profile) as the topology
+        actions. Pmin/Pmax come from the StaticPropertyRange normalValue of the DOWN/UP alterations
+        and availability from normalAvailable/normalEnabled; the network model is not used.
+        See rao.crac.redispatch.builder for the mapping rules.
+        """
+        rows = NcRemedialActionRowSource(self.data).read()
+        result = build_injection_range_actions(rows, costs=self.redispatch_costs, instant=instant)
+        logger.info(f"Redispatch remedial actions:\n{result.summary()}")
+        if result.actions:
+            self._crac.injectionRangeActions = list(self._crac.injectionRangeActions or []) + result.actions
+        return result
+
     def _get_replaced_3w_grid_state_alteration_ids(self) -> dict[str, list[str]]:
         """Map replaced 3W transformer IDs to CRAC grid-state alteration IDs.
 
@@ -1261,7 +1280,8 @@ class CracBuilder:
             )
 
     @performance_counter(units='seconds')
-    def build_crac(self, contingency_ids: list | None = None):
+    def build_crac(self, contingency_ids: list | None = None, include_redispatch: bool = False,
+                   redispatch_instant: str = "curative"):
 
         # Initialize CRAC object
         self._crac = models.Crac()  # TODO can be replaced with separate function also need to include some general parameters
@@ -1287,6 +1307,10 @@ class CracBuilder:
         if self.workaround:
             logger.info("[WORKAROUND] Applying 3w transformer replacement workaround to Remedial actions")
             self.remedial_actions_3w_workaround()
+
+        # Redispatching injection range actions are opt-in
+        if include_redispatch:
+            self.process_redispatch_actions(instant=redispatch_instant)
 
         # Update the CRAC flowCNEC limits from network
         self.update_limits_from_network()

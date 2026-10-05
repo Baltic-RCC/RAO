@@ -2,7 +2,9 @@
 import pandas as pd
 import pypowsybl
 import pytest
-from conftest import TC1_CGMES, triangle_network, unit_rows
+from conftest import TC1_CGMES, nc_unit, read_nc_profile, triangle_network, unit_rows
+from rao.crac import models
+from rao.crac.builder import CracBuilder
 from rao.crac.redispatch import CostConfig, build_crac, build_injection_range_actions, merge_into_crac, validate_crac
 from rao.parameters.loadflow import CGMES_IMPORT_PARAMETERS
 from rao.redispatch import apply_redispatch, load_min_cost_parameters, redispatch_results, run_rao
@@ -40,8 +42,7 @@ def _generator_rows(**availability):
 
 def _preventive_case(**availability):
     network = triangle_network()
-    result = build_injection_range_actions(_generator_rows(**availability), costs=COSTS, network=network,
-                                           instant="preventive")
+    result = build_injection_range_actions(_generator_rows(**availability), costs=COSTS, instant="preventive")
     crac = merge_into_crac(_base_crac([_flow_cnec("L13-preventive", "L13", "preventive", 300.0)]), result.actions)
     return network, crac
 
@@ -49,15 +50,15 @@ def _preventive_case(**availability):
 def test_import_round_trip_initial_set_point_equals_target_p():
     network = triangle_network()
     rows = _generator_rows(RA_B=(True, False))
-    crac = build_crac(build_injection_range_actions(rows, costs=COSTS, network=network).actions)
+    crac = build_crac(build_injection_range_actions(rows, costs=COSTS).actions)
 
     imported = validate_crac(network, crac)
 
     actions = imported.get_injection_range_actions()
     assert sorted(actions.index) == ["RA_A", "RA_B"]
     target_p = network.get_generators()["target_p"]
-    assert actions.loc["RA_A", "initial_set_point"] == pytest.approx(target_p["GEN_A"])
-    assert actions.loc["RA_B", "initial_set_point"] == pytest.approx(target_p["GEN_B"])
+    assert actions.loc["RA_A", "initial_set_point"] == pytest.approx(target_p["_GEN_A"])
+    assert actions.loc["RA_B", "initial_set_point"] == pytest.approx(target_p["_GEN_B"])
     assert actions.loc["RA_B", "variation_cost_down"] == pytest.approx(30.0)
     ranges = imported.get_ranges()
     assert sorted(ranges.loc[["RA_B"], "range_type"]) == ["ABSOLUTE", "RELATIVE_TO_INITIAL_NETWORK"]
@@ -72,7 +73,7 @@ def test_import_round_trip_on_tc1_cgmes_model():
     for generator_id, generator in generators.iterrows():
         rows += unit_rows(f"RA_RD_{generator['name']}", generator_id.lstrip("_"),
                           p_min=generator["min_p"], p_max=generator["max_p"], party="TSO")
-    result = build_injection_range_actions(rows, network=network)
+    result = build_injection_range_actions(rows)
     assert result.skipped == []
 
     imported = validate_crac(network, build_crac(result.actions))
@@ -84,15 +85,6 @@ def test_import_round_trip_on_tc1_cgmes_model():
         assert element["network_element_id"].startswith("_")
         assert actions.loc[action_id, "initial_set_point"] == pytest.approx(
             generators.loc[element["network_element_id"], "target_p"])
-
-
-def test_validate_warns_when_initial_set_point_outside_absolute_range(log_messages):
-    network = triangle_network()
-    # GEN_A produces 400 MW, the offered range is [0, 300]
-    rows = unit_rows("RA_A", "GEN_A", 0.0, 300.0)
-    validate_crac(network, build_crac(build_injection_range_actions(rows, network=network).actions))
-    assert any("RA_A: initial set-point 400.0 MW lies outside its absolute range [0.0, 300.0]" in m
-               for m in log_messages)
 
 
 def test_min_cost_parameters_contain_costly_block():
@@ -122,7 +114,7 @@ def test_balanced_preventive_redispatch():
     results = redispatch_results(imported, rao_result, network).set_index("action_id")
 
     assert list(results.columns) == ["generator_id", "instant", "contingency", "initial_p", "optimized_p", "delta"]
-    assert results.loc["RA_A", "generator_id"] == "GEN_A"
+    assert results.loc["RA_A", "generator_id"] == "_GEN_A"
     assert results.loc["RA_A", "optimized_p"] == pytest.approx(85.0, abs=TOLERANCE_MW)
     assert results.loc["RA_B", "optimized_p"] == pytest.approx(715.0, abs=TOLERANCE_MW)
     assert results.loc["RA_A", "delta"] == pytest.approx(-315.0, abs=TOLERANCE_MW)
@@ -136,11 +128,34 @@ def test_balanced_preventive_redispatch():
     assert optimized["margin"] == pytest.approx(5.0, abs=TOLERANCE_MW)
 
     # The RaoResult does not touch the network, apply_redispatch does
-    assert network.get_generators().loc["GEN_A", "target_p"] == pytest.approx(400.0)
+    assert network.get_generators().loc["_GEN_A", "target_p"] == pytest.approx(400.0)
     apply_redispatch(network, results.reset_index(), instant="preventive")
-    assert network.get_generators().loc["GEN_A", "target_p"] == pytest.approx(85.0, abs=TOLERANCE_MW)
+    assert network.get_generators().loc["_GEN_A", "target_p"] == pytest.approx(85.0, abs=TOLERANCE_MW)
     pypowsybl.loadflow.run_dc(network)
     assert network.get_lines().loc["L13", "p1"] == pytest.approx(295.0, abs=TOLERANCE_MW)
+
+
+def test_nc_profile_through_crac_builder_to_rao(tmp_path):
+    """
+    RA list (NC RemedialAction profile) -> CracBuilder -> OpenRAO, same case as the
+    balanced preventive redispatch. The CRAC builder never reads the network model.
+    """
+    data = read_nc_profile(nc_unit("RA_A", "GEN_A", p_min=0.0, p_max=500.0, kind="preventive", operator="AST"),
+                           nc_unit("RA_B", "GEN_B", p_min=0.0, p_max=800.0, kind="preventive", operator="AST"),
+                           tmp_path=tmp_path)
+    builder = CracBuilder(data=data, network=pd.DataFrame(columns=["ID", "KEY", "VALUE", "INSTANCE_ID"]),
+                          redispatch_costs=COSTS)
+    builder._crac = models.Crac()
+    builder.process_redispatch_actions(instant="preventive")
+    crac = builder.crac
+    crac["flowCnecs"] = [_flow_cnec("L13-preventive", "L13", "preventive", 300.0)]
+
+    network = triangle_network()
+    imported = validate_crac(network, crac)
+    results = redispatch_results(imported, run_rao(network, imported), network).set_index("action_id")
+
+    assert results.loc["RA_A", "optimized_p"] == pytest.approx(85.0, abs=TOLERANCE_MW)
+    assert results.loc["RA_B", "optimized_p"] == pytest.approx(715.0, abs=TOLERANCE_MW)
 
 
 def test_up_only_units_cannot_redispatch():
@@ -162,7 +177,7 @@ def test_balanced_curative_redispatch_with_default_instant():
     """
     network = triangle_network(parallel_l13=True)
     rows = (unit_rows("RA_A", "GEN_A", 0.0, 500.0) + unit_rows("RA_B", "GEN_B", 0.0, 800.0))
-    result = build_injection_range_actions(rows, costs=COSTS, network=network)  # curative by default
+    result = build_injection_range_actions(rows, costs=COSTS)  # curative by default
     base = _base_crac(
         flow_cnecs=[_flow_cnec("L13a-preventive", "L13a", "preventive", 250.0),
                     _flow_cnec("L13a-outage", "L13a", "outage", 1000.0, "CO_L13b"),

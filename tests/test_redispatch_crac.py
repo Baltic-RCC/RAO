@@ -3,15 +3,22 @@ import io
 import json
 import random
 import pytest
-from conftest import EXAMPLES_DIR, create_network, make_row, unit_rows
+import pandas as pd
+from conftest import (
+    EXAMPLES_DIR, create_network, make_row, nc_profile, nc_remedial_action, nc_unit, read_nc_profile, unit_rows,
+)
+from rao.crac import models
+from rao.crac.builder import CracBuilder
 from rao.crac.redispatch import (
-    BIG, CostConfig, CracMergeError, CsvRowSource, RowParseError, build_crac, build_injection_range_actions,
-    check_ra_usage_limits, crac_to_json, merge_into_crac, resolve_generator_id, unit_action_id,
+    BIG, CostConfig, CracMergeError, CsvRowSource, NcRemedialActionRowSource, RowParseError, build_crac,
+    build_injection_range_actions, check_ra_usage_limits, crac_to_json, merge_into_crac, normalize_element_id,
+    unit_action_id,
 )
 from rao.crac.redispatch.cli import main as cli_main
 
 KHES = "_f157276b-ba01-4a30-a510-d5939c71018b"
 PHES_G1 = "_a1c42d01-ba01-4def-bae4-37bea73d2960"
+PHES_G3 = "_4df6a958-ba01-40ca-bcdc-c71e464681df"
 
 ABSOLUTE = "absolute"
 RELATIVE = "relativeToInitialNetwork"
@@ -63,6 +70,84 @@ def test_csv_source_rejects_invalid_boolean():
     text = (EXAMPLES_DIR / "rd_rows.csv").read_text().replace(",true,Latvia", ",maybe,Latvia", 1)
     with pytest.raises(RowParseError, match="Row 2: invalid 'available' value 'maybe'"):
         CsvRowSource(io.StringIO(text)).read()
+
+
+def test_nc_source_reads_rotating_machine_actions(tmp_path):
+    data = read_nc_profile(nc_unit("RA_RD_KHES_G5", KHES, p_min=0.0, p_max=56.0),
+                           nc_remedial_action("RA_RD_PHES_G1_UP", PHES_G1, "up", 98.0, enabled=False),
+                           tmp_path=tmp_path)
+    rows = sorted(NcRemedialActionRowSource(data).read(), key=lambda row: row.ra_name)
+
+    assert [(r.ra_name, r.direction, r.normal_value, r.available) for r in rows] == [
+        ("RA_RD_KHES_G5_DOWN", "down", 0.0, True),
+        ("RA_RD_KHES_G5_UP", "up", 56.0, True),
+        ("RA_RD_PHES_G1_UP", "up", 98.0, False),  # GridStateAlteration.normalEnabled = false
+    ]
+    up = rows[1]
+    assert (up.kind, up.alteration_type, up.alteration_name, up.property, up.value_kind) == (
+        "curative", "RotatingMachineAction", "RD_KHES_G5_UP", "RotatingMachine.p", "absolute")
+    # Triplets drop the rdf:resource '#_', the mapping restores the leading underscore
+    assert up.grid_element_id == KHES.lstrip("_")
+    assert up.party == "https://energy.referencedata.eu/EIC/10X1001A1001B54W"
+    assert up.area == "10Y1001C--00059P"
+
+
+def test_nc_source_without_rotating_machine_actions(tmp_path):
+    assert NcRemedialActionRowSource(read_nc_profile(tmp_path=tmp_path)).read() == []
+
+
+def test_nc_profile_maps_ranges_and_availability_from_remedial_actions(tmp_path):
+    """Pmin/Pmax/availability from the RA list only, no network model involved."""
+    data = read_nc_profile(
+        nc_unit("RA_RD_KHES_G5", KHES, p_min=0.0, p_max=56.0),
+        nc_unit("RA_RD_PHES_G1", PHES_G1, p_min=0.0, p_max=98.0, down=False),   # DOWN normalAvailable = false
+        nc_unit("RA_RD_PHES_G3", "_4df6a958", p_min=0.0, p_max=97.0, up=False, down=False),
+        nc_remedial_action("RA_RD_KRU_G1_DOWN", "_kru-g1", "down", -225.0),     # pumping, DOWN row only
+        nc_remedial_action("RA_Q_NL_G2", "_nl-g2", "upAndDown", -60.0, property_name="RotatingMachine.q"),
+        tmp_path=tmp_path,
+    )
+    result = build_injection_range_actions(NcRemedialActionRowSource(data).read(), costs=SAMPLE_COSTS)
+    actions = {a["id"]: a for a in result.to_dicts()}
+
+    assert sorted(actions) == ["RA_RD_KHES_G5", "RA_RD_KRU_G1", "RA_RD_PHES_G1"]
+    assert actions["RA_RD_KHES_G5"]["networkElementIdsAndKeys"] == {KHES: 1.0}
+    assert _ranges(actions["RA_RD_KHES_G5"]) == [(ABSOLUTE, 0.0, 56.0)]
+    assert _ranges(actions["RA_RD_PHES_G1"]) == [(ABSOLUTE, 0.0, 98.0), (RELATIVE, 0.0, BIG)]
+    assert _ranges(actions["RA_RD_KRU_G1"]) == [(ABSOLUTE, -225.0, BIG), (RELATIVE, -BIG, 0.0)]
+    assert [(u.unit_id, u.reason) for u in result.skipped] == [
+        ("RA_RD_PHES_G3", "neither UP nor DOWN direction is available")]
+    assert len(result.ignored_rows) == 1  # RotatingMachine.q
+
+
+def test_crac_builder_adds_redispatch_actions_without_network_model(tmp_path):
+    data = read_nc_profile(nc_unit("RA_RD_KHES_G5", KHES, p_min=0.0, p_max=56.0),
+                           nc_unit("RA_RD_PHES_G1", PHES_G1, p_min=0.0, p_max=98.0, up=False), tmp_path=tmp_path)
+    # Empty network triplets: ranges must not depend on the model
+    empty_network = pd.DataFrame(columns=["ID", "KEY", "VALUE", "INSTANCE_ID"])
+    builder = CracBuilder(data=data, network=empty_network, redispatch_costs=SAMPLE_COSTS)
+    builder._crac = models.Crac()
+
+    result = builder.process_redispatch_actions()
+
+    assert [a.id for a in result.actions] == ["RA_RD_KHES_G5", "RA_RD_PHES_G1"]
+    crac = builder.crac
+    assert [a["id"] for a in crac["injectionRangeActions"]] == ["RA_RD_KHES_G5", "RA_RD_PHES_G1"]
+    assert crac["injectionRangeActions"][0] == {
+        "id": "RA_RD_KHES_G5", "name": "RA_RD_KHES_G5", "operator": "https://energy.referencedata.eu/EIC/10X1001A1001B54W",
+        "activationCost": 100.0, "variationCosts": {"up": 50.0, "down": 50.0},
+        "onInstantUsageRules": [{"instant": "curative"}], "networkElementIdsAndKeys": {KHES: 1.0},
+        "ranges": [{"rangeType": "absolute", "min": 0.0, "max": 56.0}],
+    }
+    assert _ranges(crac["injectionRangeActions"][1]) == [(ABSOLUTE, 0.0, 98.0), (RELATIVE, -BIG, 0.0)]
+
+
+def test_crac_builder_without_redispatch_actions_keeps_crac_unchanged(tmp_path):
+    data = read_nc_profile(nc_remedial_action("RA_Q_NL_G2", "_nl-g2", "upAndDown", -60.0,
+                                              property_name="RotatingMachine.q"), tmp_path=tmp_path)
+    builder = CracBuilder(data=data, network=pd.DataFrame(columns=["ID", "KEY", "VALUE", "INSTANCE_ID"]))
+    builder._crac = models.Crac()
+    builder.process_redispatch_actions()
+    assert "injectionRangeActions" not in builder.crac
 
 
 # ---------------------------------------------------------------- mapping
@@ -118,64 +203,26 @@ def test_unit_with_no_direction_available_is_skipped(log_messages):
     result = build_injection_range_actions(unit_rows("RA_U", "G1", 0.0, 93.0, up=False, down=False))
     assert result.actions == []
     assert [(u.unit_id, u.grid_element_id, u.reason) for u in result.skipped] == [
-        ("RA_U", "G1", "neither UP nor DOWN direction is available")]
-    assert any("RA_U (G1) skipped" in m for m in log_messages)
+        ("RA_U", "_G1", "neither UP nor DOWN direction is available")]
+    assert any("RA_U (_G1) skipped" in m for m in log_messages)
 
 
-def test_missing_down_row_falls_back_to_network_min_p(log_messages):
-    network = _generator_network(("G1", 15.0, 120.0, 50.0))
-    rows = [make_row("RA_U_UP", "G1", "up", 93.0)]
-    action = _single(build_injection_range_actions(rows, network=network))
-    # The missing DOWN row means only UP is offered
-    assert _ranges(action) == [(ABSOLUTE, 15.0, 93.0), (RELATIVE, 0.0, BIG)]
-    assert any("DOWN row missing, using network min_p = 15.0" in m for m in log_messages)
-
-
-def test_missing_up_row_falls_back_to_network_max_p(log_messages):
-    network = _generator_network(("G1", 15.0, 120.0, 50.0))
-    rows = [make_row("RA_U_DOWN", "G1", "down", 20.0)]
-    action = _single(build_injection_range_actions(rows, network=network))
-    assert _ranges(action) == [(ABSOLUTE, 20.0, 120.0), (RELATIVE, -BIG, 0.0)]
-    assert any("UP row missing, using network max_p = 120.0" in m for m in log_messages)
-
-
-def test_missing_rows_without_network_fall_back_to_zero_and_big(log_messages):
+def test_missing_rows_open_the_bound_and_keep_the_direction_closed(log_messages):
+    """No model lookup: the missing side is opened to BIG, the relative range keeps it at P0."""
     up_only = _single(build_injection_range_actions([make_row("RA_U_UP", "G1", "up", 93.0)]))
-    assert _ranges(up_only) == [(ABSOLUTE, 0.0, 93.0), (RELATIVE, 0.0, BIG)]
-    assert any("DOWN row missing and no network given, using Pmin = 0" in m for m in log_messages)
+    assert _ranges(up_only) == [(ABSOLUTE, -BIG, 93.0), (RELATIVE, 0.0, BIG)]
+    assert any(f"DOWN row missing, DOWN not offered, using Pmin = {-BIG}" in m for m in log_messages)
 
     down_only = _single(build_injection_range_actions([make_row("RA_U_DOWN", "G1", "down", 5.0)]))
     assert _ranges(down_only) == [(ABSOLUTE, 5.0, BIG), (RELATIVE, -BIG, 0.0)]
-    assert any(f"UP row missing and no network given, using Pmax = {BIG}" in m for m in log_messages)
+    assert any(f"UP row missing, UP not offered, using Pmax = {BIG}" in m for m in log_messages)
 
 
-@pytest.mark.parametrize("row_id, network_id", [
-    ("_f157276b", "f157276b"),   # rows keep the rdf:ID underscore, IIDM ids do not
-    ("f157276b", "_f157276b"),   # rows hold the mRID, IIDM ids keep the rdf:ID underscore
-    ("_f157276b", "_f157276b"),
-])
-def test_element_id_resolution(row_id, network_id):
-    network = _generator_network((network_id, 0.0, 100.0, 50.0))
-    action = _single(build_injection_range_actions(unit_rows("RA_U", row_id, 0.0, 56.0), network=network))
-    assert action["networkElementIdsAndKeys"] == {network_id: 1.0}
-
-
-def test_resolve_generator_id():
-    assert resolve_generator_id("_abc", ["abc"]) == "abc"
-    assert resolve_generator_id("abc", ["_abc"]) == "_abc"
-    assert resolve_generator_id("__abc", ["_abc"]) == "_abc"
-    assert resolve_generator_id("abc", ["abd"]) is None
-
-
-def test_unresolved_element_is_skipped_and_reported(log_messages):
-    network = _generator_network(("G1", 0.0, 100.0, 50.0))
-    rows = unit_rows("RA_U1", "G1", 0.0, 56.0) + unit_rows("RA_U2", "_MISSING", 0.0, 56.0)
-    result = build_injection_range_actions(rows, network=network)
-    assert [a.id for a in result.actions] == ["RA_U1"]
-    assert [(u.unit_id, u.grid_element_id, u.reason) for u in result.skipped] == [
-        ("RA_U2", "_MISSING", "grid element not found among network generators")]
-    assert "RA_U2 (_MISSING): grid element not found among network generators" in result.summary()
-    assert any("RA_U2 (_MISSING) skipped" in m for m in log_messages)
+@pytest.mark.parametrize("row_id", ["f157276b", "_f157276b", "__f157276b"])
+def test_element_id_gets_single_leading_underscore(row_id):
+    action = _single(build_injection_range_actions(unit_rows("RA_U", row_id, 0.0, 56.0)))
+    assert action["networkElementIdsAndKeys"] == {"_f157276b": 1.0}
+    assert normalize_element_id(row_id) == "_f157276b"
 
 
 def test_rows_of_same_element_with_and_without_underscore_are_one_unit():
@@ -213,7 +260,7 @@ def test_same_action_id_on_two_elements_skips_both():
     rows = unit_rows("RA_U", "G1", 0.0, 56.0) + unit_rows("RA_U", "G2", 0.0, 56.0)
     result = build_injection_range_actions(rows)
     assert result.actions == []
-    assert {u.grid_element_id for u in result.skipped} == {"G1", "G2"}
+    assert {u.grid_element_id for u in result.skipped} == {"_G1", "_G2"}
 
 
 def test_pmin_above_pmax_is_skipped():
@@ -390,25 +437,37 @@ def test_merge_rejects_element_already_used_by_a_range_action(element_id, used_b
 # ---------------------------------------------------------------- CLI
 
 
-def test_cli_writes_crac_and_summary(tmp_path, capsys):
-    network = _generator_network(("f157276b-ba01-4a30-a510-d5939c71018b", 0.0, 60.0, 30.0),
-                                 ("a1c42d01-ba01-4def-bae4-37bea73d2960", 0.0, 100.0, 50.0),
-                                 ("4df6a958-ba01-40ca-bcdc-c71e464681df", 0.0, 100.0, 50.0))
-    network_path = tmp_path / "model.xiidm"
-    network.save(str(network_path), format="XIIDM")
+def test_cli_from_nc_profile_writes_crac_and_summary(tmp_path, capsys):
+    profile = tmp_path / "RA.xml"
+    profile.write_text(nc_profile(nc_unit("RA_RD_KHES_G5", KHES, p_min=0.0, p_max=56.0),
+                                  nc_unit("RA_RD_PHES_G1", PHES_G1, p_min=0.0, p_max=98.0),
+                                  nc_unit("RA_RD_PHES_G3", PHES_G3, p_min=0.0, p_max=97.0, up=False, down=False)))
     out = tmp_path / "crac_out.json"
 
-    code = cli_main(["--rows", str(EXAMPLES_DIR / "rd_rows.csv"), "--costs", str(EXAMPLES_DIR / "costs.yaml"),
-                     "--network", str(network_path), "--out", str(out), "--log-level", "ERROR"])
+    code = cli_main(["--ra-profile", str(profile), "--costs", str(EXAMPLES_DIR / "costs.yaml"),
+                     "--out", str(out), "--log-level", "ERROR"])
 
     assert code == 0
     crac = json.loads(out.read_text())
     assert [a["id"] for a in crac["injectionRangeActions"]] == ["RA_RD_KHES_G5", "RA_RD_PHES_G1"]
-    # Element ids resolved to the network ids (no leading underscore)
-    assert crac["injectionRangeActions"][0]["networkElementIdsAndKeys"] == {"f157276b-ba01-4a30-a510-d5939c71018b": 1.0}
+    assert crac["injectionRangeActions"][0]["networkElementIdsAndKeys"] == {KHES: 1.0}
     printed = capsys.readouterr().out
     assert "Injection range actions written: 2" in printed
-    assert "RA_RD_PHES_G3 (4df6a958-ba01-40ca-bcdc-c71e464681df): neither UP nor DOWN direction is available" in printed
+    assert f"RA_RD_PHES_G3 ({PHES_G3}): neither UP nor DOWN direction is available" in printed
+
+
+def test_cli_from_csv_validates_by_openrao_import(tmp_path, capsys):
+    # The network is only used for the import check, not for ranges
+    network = _generator_network((KHES, 0.0, 60.0, 30.0), (PHES_G1, 0.0, 100.0, 50.0))
+    network_path = tmp_path / "model.xiidm"
+    network.save(str(network_path), format="XIIDM")
+    out = tmp_path / "crac_out.json"
+
+    code = cli_main(["--rows", str(EXAMPLES_DIR / "rd_rows.csv"), "--network", str(network_path),
+                     "--out", str(out), "--log-level", "ERROR"])
+
+    assert code == 0
+    assert "Injection range actions written: 2" in capsys.readouterr().out
 
 
 def test_cli_merges_into_base_crac(tmp_path):

@@ -39,66 +39,95 @@ flowchart TD
 
 ## Local redispatching CRAC builder
 
-`rao/crac/redispatch` converts per-unit redispatching remedial-action rows (one UP row and one DOWN row per
-generating unit, from the RCC remedial-action export) into OpenRAO `injectionRangeActions`. The JSON CRAC it
-produces imports into pypowsybl 1.16.1 (OpenRAO 7.3.0), and `rao/redispatch.py` runs a MIN_COST RAO on it.
+`rao/crac/redispatch` converts redispatching remedial actions (one UP and one DOWN `RotatingMachineAction`
+per generating unit) into OpenRAO `injectionRangeActions`. The JSON CRAC it produces imports into
+pypowsybl 1.16.1 (OpenRAO 7.3.0), and `rao/redispatch.py` runs a MIN_COST RAO on it.
 
-OpenRAO's native NC CRAC importer is not used for these rows. It maps a `RotatingMachineAction` only with
-direction `none`, as a fixed set-point network action, so up/down ranges would not become range actions.
+The remedial actions are retrieved the same way as for the topology actions: the NC RemedialAction profile
+(`RA`) from object storage, loaded into triplets with `pd.read_RDF`. Pmin, Pmax and availability are mapped
+**only from that remedial action list**. The network model is never loaded or read for limits or ranges.
 
-### Usage
+OpenRAO's native NC CRAC importer is not used for these actions. It maps a `RotatingMachineAction` only
+with direction `none`, as a fixed set-point network action, so up/down ranges would not become range actions.
+
+### In the CRAC building process
+
+`CracBuilder.build_crac(contingency_ids, include_redispatch=True)` calls
+`CracBuilder.process_redispatch_actions()`, which adds the injection range actions to the CRAC built from the
+same `data` triplets (CO/AE/RA). In the RAO worker this is switched off by default (`rao/config.properties`):
+
+```properties
+CRAC_INCLUDE_REDISPATCH = False   # True adds redispatch injection range actions to the CRAC
+REDISPATCH_COSTS_PATH = None      # cost config (YAML/JSON), built-in defaults when None
+```
+
+The worker's default RAO parameters use MAX_MIN_MARGIN, which ignores redispatch costs. Use the MIN_COST
+parameters below for cost-based redispatch.
+
+Mapping from the NC RemedialAction profile (`NcRemedialActionRowSource`):
+
+| NC object / attribute | used as |
+|---|---|
+| `GridStateAlterationRemedialAction` `IdentifiedObject.name` | action id/name, without `_UP`/`_DOWN` |
+| `RemedialAction.RemedialActionSystemOperator` | `operator` (as for the network actions) |
+| `RemedialAction.normalAvailable` and `GridStateAlteration.normalEnabled` | availability of the direction |
+| `RemedialAction.kind` | checked against the usage rule instant (warning only) |
+| `RotatingMachineAction.RotatingMachine` | network element, written as `_<mRID>` |
+| `StaticPropertyRange` `PropertyReference` | must be `RotatingMachine.p` |
+| `StaticPropertyRange` `RangeConstraint.direction` | `up` or `down` (`RelativeDirectionKind`) |
+| `StaticPropertyRange` `RangeConstraint.normalValue` | UP: Pmax, DOWN: Pmin |
+| `StaticPropertyRange` `RangeConstraint.valueKind` | must be `absolute` (`ValueOffsetKind`) |
+
+### Command line
 
 ```bash
-build-rd-crac --rows examples/redispatch/rd_rows.csv --costs examples/redispatch/costs.yaml \
-              [--network model.xiidm] [--base-crac crac.json] --out crac_out.json \
+build-rd-crac --ra-profile examples/redispatch/rd_remedial_actions.xml --costs examples/redispatch/costs.yaml \
+              [--base-crac crac.json] [--network model.xiidm] --out crac_out.json \
               [--instant curative] [--contingency CO_ID ...]
+build-rd-crac --rows examples/redispatch/rd_rows.csv ...      # RCC remedial-action export (CSV) instead
 ```
 
 `build-rd-crac` is installed by `uv sync`; `python -m rao.crac.redispatch.cli` is equivalent. It prints the
-actions written and the units skipped, with reasons. With `--network`, element IDs are resolved against the
-network generators, and the CRAC is validated by importing it with OpenRAO. CGMES `.zip` models are loaded
-with the repository CGMES import parameters. With `--base-crac`, the actions are merged into an existing CRAC.
-With `--contingency`, `onContingencyStateUsageRules` are written instead of an `onInstantUsageRule`; this
-needs `--base-crac`, because the contingencies must exist.
+actions written and the units skipped, with reasons. `--network` is optional and only used to check that
+OpenRAO imports the generated CRAC. With `--base-crac`, the actions are merged into an existing CRAC. With
+`--contingency`, `onContingencyStateUsageRules` are written instead of an `onInstantUsageRule`; this needs
+`--base-crac`, because the contingencies must exist.
 
 ```python
-from rao.crac.redispatch import CostConfig, CsvRowSource, build_injection_range_actions, merge_into_crac, validate_crac
+from rao.crac.redispatch import CostConfig, NcRemedialActionRowSource, build_injection_range_actions, merge_into_crac, import_crac
 from rao.redispatch import load_min_cost_parameters, run_rao, redispatch_results, apply_redispatch
 
-rows = CsvRowSource("export.csv").read()                     # any RowSource adapter: rows -> RedispatchRow
-result = build_injection_range_actions(rows, costs=CostConfig.from_file("costs.yaml"), network=network)
+rows = NcRemedialActionRowSource(pd.read_RDF(ra_profiles)).read()  # or CsvRowSource("export.csv").read()
+result = build_injection_range_actions(rows, costs=CostConfig.from_file("costs.yaml"))
 print(result.summary())                                      # actions, skipped units, defaulted costs
 crac = merge_into_crac(base_crac_dict, result.actions)       # or build_crac(result.actions)
-imported = validate_crac(network, crac)                      # OpenRAO import + action/range checks
+imported = import_crac(network, crac)                        # pypowsybl Crac
 rao_result = run_rao(network, imported, load_min_cost_parameters(dc=True))
 results = redispatch_results(imported, rao_result, network)  # action, generator, instant, contingency, P0, P, delta
 apply_redispatch(network, results, instant="curative", contingency="CO_ID")  # optional, RaoResult never edits the network
 ```
 
-Input sources implement `RowSource.read() -> list[RedispatchRow]`. `CsvRowSource` (and `DataFrameRowSource`)
-read the export columns `kind, ra_name, available, area, party, alteration_type, alteration_name, property,
-grid_element_id, normal_value, direction, value_kind`. Other sources, such as the NC/CSA RemedialAction XML
-profile, can be added as further adapters.
+Sources implement `RowSource.read() -> list[RedispatchRow]`: `NcRemedialActionRowSource` (NC profile
+triplets), `CsvRowSource` and `DataFrameRowSource` (RCC export columns `kind, ra_name, available, area, party,
+alteration_type, alteration_name, property, grid_element_id, normal_value, direction, value_kind`).
 
 ### Mapping rules
 
-- Only rows with `alteration_type == RotatingMachineAction`, `property == RotatingMachine.p` and direction
-  `up`/`down` are processed; other rows are counted as ignored. A `value_kind` other than `absolute` is
-  rejected with an error.
-- Rows are grouped by `grid_element_id`, and **one** `InjectionRangeAction` is emitted per unit, because
-  OpenRAO does not allow two range actions on the same element. Rows whose IDs differ only by the leading
-  `_` belong to the same unit.
-- Action id and name = `ra_name` without the `_UP`/`_DOWN` suffix (e.g. `RA_RD_KHES_G5`); `operator` = `party`.
-- `networkElementIdsAndKeys = {<generator id>: 1.0}`: exactly one element with key 1.0. The set-point is then
-  the generator MW (`targetP`), and OpenRAO's initial set-point consistency check cannot fail.
-- UP row `normal_value` = Pmax, DOWN row `normal_value` = Pmin.
-- A missing UP or DOWN row means that direction is not offered. Its bound falls back to the network
-  generator's `max_p` / `min_p` when a network is given, otherwise to Pmax = 100000 / Pmin = 0, with a warning.
-- Element ID resolution (with a network): `id`, `id.lstrip("_")` and `"_" + id.lstrip("_")` are tried against
-  the network generators, because CGMES rdf:IDs may or may not keep the leading `_` after the IIDM import.
-  Unresolved units are skipped and reported.
-- Units are also skipped and reported for: duplicate UP/DOWN rows, inconsistent `ra_name`/`party` between UP
-  and DOWN, Pmin > Pmax, the same action id on two elements, or no direction available.
+- Only `RotatingMachineAction` rows on `RotatingMachine.p` with direction `up`/`down` are processed; other
+  rows (e.g. `RotatingMachine.q`, `none`, `upAndDown`) are counted as ignored. A `valueKind` other than
+  `absolute` is rejected with an error.
+- Rows are grouped by grid element, and **one** `InjectionRangeAction` is emitted per unit, because OpenRAO
+  does not allow two range actions on the same element.
+- Action id and name = remedial action name without the `_UP`/`_DOWN` suffix (e.g. `RA_RD_KHES_G5`).
+- `networkElementIdsAndKeys = {"_<RotatingMachine mRID>": 1.0}`: exactly one element with key 1.0, so the
+  set-point is the generator MW. The element id always gets a single leading `_`, like the other CRAC
+  elements and the IIDM ids imported with `source-for-iidm-id = rdfID`.
+- UP `normalValue` = Pmax, DOWN `normalValue` = Pmin.
+- A missing UP or DOWN action means that direction is not offered. Its bound is opened (Pmax = +100000,
+  Pmin = −100000) with a warning, and the relative range then caps the set-point at its initial value. This
+  also works for units with negative output, such as pumped storage when pumping.
+- Units are skipped and reported for: no direction available, duplicate UP/DOWN actions, inconsistent
+  name/operator between UP and DOWN, Pmin > Pmax, or the same action id on two elements.
 - Usage rule: `onInstantUsageRules: [{"instant": "curative"}]` by default (configurable), or
   `onContingencyStateUsageRules` for a given contingency list.
 - Output is deterministic: actions are sorted by id and keys always come in the same order.
@@ -115,7 +144,8 @@ OpenRAO intersects all ranges of an action, so the current output P0 is not need
 | no | yes | `absolute [Pmin, Pmax]` + `relativeToInitialNetwork [-BIG, 0]` | [Pmin, P0] |
 | no | no | unit skipped and reported | — |
 
-`validate_crac` warns when a unit's initial set-point lies outside its absolute [Pmin, Pmax].
+`validate_crac(network, crac)` only checks that OpenRAO imports the actions with these ranges; it does not
+compare them with the network model.
 
 ### Cost config
 
