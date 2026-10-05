@@ -285,11 +285,18 @@ class RaoSettingsManager:
         "1.16.1": f"{Path(__file__).parent.joinpath('rao_v34.json')}",
     }
 
-    def __init__(self):
-        self.default_path = Path(self.RAO_PARAMETERS_VERSION_MAP.get(pypowsybl.__version__, None))
-        if not self.default_path:
-            raise ValueError(f"Unsupported version to get parameters: {pypowsybl.__version__}")
-        override_env = os.environ.get("RAO_CONFIG_OVERRIDE_PATH")
+    def __init__(self, default_path: str | Path | None = None, use_env_override: bool = True):
+        """
+        Args:
+            default_path: base parameters file, defaults to the file mapped to the installed pypowsybl version
+            use_env_override: apply the RAO_CONFIG_OVERRIDE_PATH override file if defined
+        """
+        if default_path is None:
+            default_path = self.RAO_PARAMETERS_VERSION_MAP.get(pypowsybl.__version__, None)
+            if not default_path:
+                raise ValueError(f"Unsupported version to get parameters: {pypowsybl.__version__}")
+        self.default_path = Path(default_path)
+        override_env = os.environ.get("RAO_CONFIG_OVERRIDE_PATH") if use_env_override else None
         self.override_path = Path(override_env) if override_env else None
         self.config = self._load_and_merge()
 

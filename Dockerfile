@@ -17,7 +17,7 @@ WORKDIR /app
 # Sync python modules as dependencies
 COPY pyproject.toml .
 COPY uv.lock .
-RUN uv export -o pylock.toml
+RUN uv export --no-emit-project -o pylock.toml
 RUN uv pip sync pylock.toml --system  && uv cache clean
 
 # Copy license file and dependencies license reference

@@ -166,6 +166,39 @@ class NetworkAction(BaseModel):
         return value
 
 
+class VariationCosts(BaseModel):
+    """Cost per MW of moving a range action set-point up or down."""
+    up: float
+    down: float
+
+
+class InjectionRange(BaseModel):
+    """
+    OpenRAO injection range. OpenRAO intersects all ranges of one range action:
+        - 'absolute': bounds on the set-point itself (MW when the element key is 1.0)
+        - 'relativeToInitialNetwork': bounds on the variation from the initial set-point
+    """
+    rangeType: Literal['absolute', 'relativeToInitialNetwork', 'relativeToPreviousInstant']
+    min: float
+    max: float
+
+
+class InjectionRangeAction(BaseModel):
+    """
+    OpenRAO InjectionRangeAction. Network element IDs are written as given (no '_' prefix
+    is added, unlike the CNEC models), they must already match the IIDM generator IDs.
+    """
+    id: str
+    name: str
+    operator: str
+    activationCost: Optional[float] = None
+    variationCosts: Optional[VariationCosts] = None
+    onInstantUsageRules: Optional[List[Dict]] = None
+    onContingencyStateUsageRules: Optional[List[Dict]] = None
+    networkElementIdsAndKeys: Dict[str, float]
+    ranges: List[InjectionRange]
+
+
 class Crac(BaseModel):
 
     class Config:
@@ -191,6 +224,8 @@ class Crac(BaseModel):
     # Kept unset unless the opt-in ER VoltageAngleLimit processing is requested.
     angleCnecs: Optional[List[AngleCnec]] = None
     networkActions: List[NetworkAction] = Field(default_factory=list)
+    # Kept unset unless redispatching range actions are added (see rao.crac.redispatch)
+    injectionRangeActions: Optional[List[InjectionRangeAction]] = None
 
     @field_serializer("voltageCnecs", mode='plain')
     def serialize_voltage_cnecs(self, values: List[VoltageCnec]) -> List[VoltageCnec]:

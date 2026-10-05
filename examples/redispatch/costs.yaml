@@ -1,0 +1,13 @@
+# Redispatching costs keyed by unit action id (ra_name without _UP/_DOWN).
+# Values missing for a unit fall back to 'defaults' (a warning is logged per unit).
+defaults:
+  activationCost: 100.0       # EUR per activation
+  variationCosts:
+    up: 50.0                  # EUR/MW
+    down: 50.0                # EUR/MW
+units:
+  RA_RD_KHES_G5:
+    activationCost: 100.0
+    variationCosts: {up: 50.0, down: 50.0}
+  RA_RD_PHES_G1:
+    variationCosts: {up: 45.0, down: 40.0}

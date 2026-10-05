@@ -1,0 +1,7 @@
+kind,ra_name,available,area,party,alteration_type,alteration_name,property,grid_element_id,normal_value,direction,value_kind
+curative,RA_RD_KHES_G5_UP,true,Latvia,AST,RotatingMachineAction,RD_KHES_G5_UP,RotatingMachine.p,_f157276b-ba01-4a30-a510-d5939c71018b,56,up,absolute
+curative,RA_RD_KHES_G5_DOWN,true,Latvia,AST,RotatingMachineAction,RD_KHES_G5_DOWN,RotatingMachine.p,_f157276b-ba01-4a30-a510-d5939c71018b,0,down,absolute
+curative,RA_RD_PHES_G1_UP,true,Latvia,AST,RotatingMachineAction,RD_PHES_G1_UP,RotatingMachine.p,_a1c42d01-ba01-4def-bae4-37bea73d2960,98,up,absolute
+curative,RA_RD_PHES_G1_DOWN,true,Latvia,AST,RotatingMachineAction,RD_PHES_G1_DOWN,RotatingMachine.p,_a1c42d01-ba01-4def-bae4-37bea73d2960,0,down,absolute
+curative,RA_RD_PHES_G3_UP,false,Latvia,AST,RotatingMachineAction,RD_PHES_G3_UP,RotatingMachine.p,_4df6a958-ba01-40ca-bcdc-c71e464681df,97,up,absolute
+curative,RA_RD_PHES_G3_DOWN,false,Latvia,AST,RotatingMachineAction,RD_PHES_G3_DOWN,RotatingMachine.p,_4df6a958-ba01-40ca-bcdc-c71e464681df,0,down,absolute
