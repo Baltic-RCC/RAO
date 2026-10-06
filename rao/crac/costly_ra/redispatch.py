@@ -20,13 +20,14 @@ Mapping rules:
     - UP normal_value = Pmax, DOWN normal_value = Pmin; without a DOWN value Pmin = 0, without
       an UP value the unit is left out of the CRAC (the shift cannot be bounded)
     - availability is expressed as intersected ranges (see _ranges())
+    - no costs: they are assigned to all CRAC remedial actions by rao.crac.costs
+      (CracBuilder.apply_costs)
 """
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from loguru import logger
 from rao.crac import models
-from rao.crac.costly_ra.costs import CostConfig
 from rao.crac.costly_ra.crac import BIG, DEFAULT_INSTANT, action_to_dict, normalize_element_id, usage_rules
 from rao.crac.costly_ra.sources import DIRECTION_DOWN, DIRECTION_UP, RedispatchRow
 
@@ -50,7 +51,6 @@ class RedispatchBuildResult:
     actions: list[models.InjectionRangeAction] = field(default_factory=list)
     skipped: list[SkippedUnit] = field(default_factory=list)
     ignored_rows: list[RedispatchRow] = field(default_factory=list)
-    defaulted_costs: dict[str, list[str]] = field(default_factory=dict)
 
     def to_dicts(self) -> list[dict]:
         return [action_to_dict(action) for action in self.actions]
@@ -64,10 +64,6 @@ class RedispatchBuildResult:
         lines.append(f"Units skipped: {len(self.skipped)}")
         for unit in self.skipped:
             lines.append(f"  {unit.unit_id} ({unit.grid_element_id}): {unit.reason}")
-        if self.defaulted_costs:
-            lines.append(f"Units using default costs: {len(self.defaulted_costs)}")
-            for unit_id, names in sorted(self.defaulted_costs.items()):
-                lines.append(f"  {unit_id}: {', '.join(names)}")
         if self.ignored_rows:
             lines.append(f"Rows ignored (not RotatingMachine.p up/down redispatch): {len(self.ignored_rows)}")
         return "\n".join(lines)
@@ -103,7 +99,6 @@ def _is_redispatch_row(row: RedispatchRow) -> bool:
 
 
 def build_injection_range_actions(rows: Iterable[RedispatchRow],
-                                  costs: CostConfig | None = None,
                                   instant: str = DEFAULT_INSTANT,
                                   contingency_ids: list[str] | None = None) -> RedispatchBuildResult:
     """
@@ -111,9 +106,6 @@ def build_injection_range_actions(rows: Iterable[RedispatchRow],
 
     Args:
         rows: typed rows from any RowSource
-        costs: cost configuration. Costs are disabled when not given: no activationCost /
-            variationCosts are written and no cost warnings are logged (MAX_MIN_MARGIN runs
-            do not use them). Pass a CostConfig to enable them, e.g. for MIN_COST.
         instant: instant of the usage rule (default 'curative')
         contingency_ids: if given, onContingencyStateUsageRules for these contingencies
             are emitted instead of an onInstantUsageRule
@@ -144,7 +136,7 @@ def build_injection_range_actions(rows: Iterable[RedispatchRow],
 
     actions = []
     for unit_rows in groups.values():
-        action = _build_unit_action(unit_rows, costs, instant, contingency_ids, result)
+        action = _build_unit_action(unit_rows, instant, contingency_ids, result)
         if action is not None:
             actions.append(action)
 
@@ -167,7 +159,6 @@ def _skip(result: RedispatchBuildResult, unit_id: str, element_id: str, reason: 
 
 
 def _build_unit_action(rows: list[RedispatchRow],
-                       costs: CostConfig | None,
                        instant: str,
                        contingency_ids: list[str] | None,
                        result: RedispatchBuildResult) -> models.InjectionRangeAction | None:
@@ -220,20 +211,10 @@ def _build_unit_action(rows: list[RedispatchRow],
         _skip(result, unit_id, element_id, "neither UP nor DOWN direction is available")
         return None
 
-    cost_fields = {}
-    if costs is not None:
-        cost, defaulted = costs.resolve(unit_id)
-        if defaulted:
-            logger.warning(f"Redispatch unit {unit_id}: using default costs for {', '.join(defaulted)}")
-            result.defaulted_costs[unit_id] = defaulted
-        cost_fields = {"activationCost": cost.activation_cost,
-                       "variationCosts": models.VariationCosts(up=cost.up, down=cost.down)}
-
     return models.InjectionRangeAction(
         id=unit_id,
         name=unit_id,
         operator=rows[0].party,
-        **cost_fields,
         networkElementIdsAndKeys={element_id: 1.0},
         ranges=_ranges(p_min, p_max, up_available, down_available),
         **usage_rules(instant, contingency_ids),

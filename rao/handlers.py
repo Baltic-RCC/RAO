@@ -16,7 +16,7 @@ from common.config_parser import parse_app_properties
 from common.decorators import performance_counter
 from rao.crac.builder import CracBuilder
 from rao.crac.context import CracWorkaroundContext
-from rao.crac.costly_ra import CostConfig
+from rao.crac.costs import CostConfig
 from rao.parameters.manager import RaoSettingsManager
 from rao.parameters.manager import LoadflowSettingsManager
 from rao.optimizer import Optimizer
@@ -562,9 +562,9 @@ class HandlerVirtualOperator:
         # Create CRAC service
         logger.info(f"Loading network to triplets for CRAC service")
         network_triplets = pd.read_RDF(network_object)
-        redispatch_costs = CostConfig.from_file(REDISPATCH_COSTS_PATH) if REDISPATCH_COSTS_PATH else None
+        crac_costs = CostConfig.from_file(CRAC_COSTS_PATH) if CRAC_COSTS_PATH else None
         crac_service = CracBuilder(data=input_files_data, network=network_triplets, workaround=workaround_ctx,
-                                   redispatch_costs=redispatch_costs)
+                                   costs=crac_costs)
         crac_service.get_limits()  # get limits from model and store in CRAC service object
 
         # Group by contingency id

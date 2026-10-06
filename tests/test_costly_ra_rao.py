@@ -5,14 +5,15 @@ import pytest
 from conftest import TC1_CGMES, nc_unit, read_nc_profile, triangle_network, unit_rows
 from rao.crac import models
 from rao.crac.builder import CracBuilder
-from rao.crac.costly_ra import CostConfig, build_crac, build_injection_range_actions, merge_into_crac, validate_crac
+from rao.crac.costly_ra import build_crac, build_injection_range_actions, merge_into_crac, validate_crac
+from rao.crac.costs import CostConfig
 from rao.parameters.loadflow import CGMES_IMPORT_PARAMETERS
 from rao.parameters.manager import RaoSettingsManager
 from rao.costly_ra import apply_redispatch, load_min_cost_parameters, redispatch_results, run_rao
 
 COSTS = CostConfig.from_dict({
     "defaults": {"activationCost": 100.0, "variationCosts": {"up": 10.0, "down": 10.0}},
-    "units": {"RA_A": {"variationCosts": {"down": 40.0}}, "RA_B": {"variationCosts": {"down": 30.0}}},
+    "remedialActions": {"RA_A": {"variationCosts": {"down": 40.0}}, "RA_B": {"variationCosts": {"down": 30.0}}},
 })
 TOLERANCE_MW = 1.0
 
@@ -53,7 +54,8 @@ def _generator_rows(**availability):
 
 def _preventive_case(**availability):
     network = triangle_network()
-    result = build_injection_range_actions(_generator_rows(**availability), costs=COSTS, instant="preventive")
+    result = build_injection_range_actions(_generator_rows(**availability), instant="preventive")
+    COSTS.apply(result.actions)
     crac = merge_into_crac(_base_crac([_flow_cnec("L13-preventive", "L13", "preventive", 300.0)]), result.actions)
     return network, crac
 
@@ -61,7 +63,9 @@ def _preventive_case(**availability):
 def test_import_round_trip_initial_set_point_equals_target_p():
     network = triangle_network()
     rows = _generator_rows(RA_B=(True, False))
-    crac = build_crac(build_injection_range_actions(rows, costs=COSTS).actions)
+    actions = build_injection_range_actions(rows).actions
+    COSTS.apply(actions)
+    crac = build_crac(actions)
 
     imported = validate_crac(network, crac)
 
@@ -155,9 +159,10 @@ def test_nc_profile_through_crac_builder_to_rao(tmp_path):
                            nc_unit("RA_B", "GEN_B", p_min=0.0, p_max=800.0, kind="preventive", operator="AST"),
                            tmp_path=tmp_path)
     builder = CracBuilder(data=data, network=pd.DataFrame(columns=["ID", "KEY", "VALUE", "INSTANCE_ID"]),
-                          redispatch_costs=COSTS)
+                          costs=COSTS)
     builder._crac = models.Crac()
     builder.process_redispatch_actions(instant="preventive")
+    builder.apply_costs()
     crac = builder.crac
     crac["flowCnecs"] = [_flow_cnec("L13-preventive", "L13", "preventive", 300.0)]
 
@@ -214,7 +219,8 @@ def test_balanced_curative_redispatch_with_default_instant():
     """
     network = triangle_network(parallel_l13=True)
     rows = (unit_rows("RA_A", "GEN_A", 0.0, 500.0) + unit_rows("RA_B", "GEN_B", 0.0, 800.0))
-    result = build_injection_range_actions(rows, costs=COSTS)  # curative by default
+    result = build_injection_range_actions(rows)  # curative by default
+    COSTS.apply(result.actions)
     imported = validate_crac(network, merge_into_crac(_curative_base_crac(), result.actions))
 
     rao_result = run_rao(network, imported)

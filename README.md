@@ -62,7 +62,7 @@ same `data` triplets (CO/AE/RA). In the RAO worker this is switched off by defau
 
 ```properties
 CRAC_INCLUDE_REDISPATCH = False   # True adds redispatch injection range actions to the CRAC
-REDISPATCH_COSTS_PATH = None      # cost config (YAML/JSON); None = no costs written (default)
+CRAC_COSTS_PATH = None            # remedial action cost config (YAML/JSON); None = no costs written (default)
 ```
 
 Each unit has a separate `RA_RD_<unit>_UP` and `RA_RD_<unit>_DOWN` remedial action (alterations
@@ -91,12 +91,14 @@ Mapping from the NC RemedialAction profile (`NcRemedialActionRowSource`):
 ### Python API
 
 ```python
-from rao.crac.costly_ra import CostConfig, NcRemedialActionRowSource, build_injection_range_actions, merge_into_crac, import_crac
+from rao.crac.costly_ra import NcRemedialActionRowSource, build_injection_range_actions, merge_into_crac, import_crac
+from rao.crac.costs import CostConfig
 from rao.costly_ra import load_min_cost_parameters, run_rao, redispatch_results, apply_redispatch
 
 rows = NcRemedialActionRowSource(pd.read_RDF(ra_profiles)).read()  # or CsvRowSource("export.csv").read()
-result = build_injection_range_actions(rows, costs=CostConfig.from_file("costs.yaml"))
-print(result.summary())                                      # actions, skipped units, defaulted costs
+result = build_injection_range_actions(rows)
+print(result.summary())                                      # actions written, skipped units
+CostConfig.from_file("crac_costs.yaml").apply(result.actions)  # optional, needed for MIN_COST
 crac = merge_into_crac(base_crac_dict, result.actions)       # or build_crac(result.actions)
 # Building the CRAC above needs no network model; the network is only needed to run the RAO
 imported = import_crac(network, crac)                        # pypowsybl Crac
@@ -149,33 +151,39 @@ OpenRAO intersects all ranges of an action, so the current output P0 is not need
 `validate_crac(network, crac)` only checks that OpenRAO imports the actions with these ranges; it does not
 compare them with the network model.
 
-### Cost config
+### Remedial action costs (`rao/crac/costs.py`)
 
-Costs are **disabled by default**: without a cost config no `activationCost`/`variationCosts` are written and
-no cost warnings are logged. They are only needed for the MIN_COST objective. Costs are not part of the
-remedial action list. When enabled (`REDISPATCH_COSTS_PATH`, `CracBuilder(redispatch_costs=...)` or
-`build_injection_range_actions(costs=...)`), they are loaded from YAML or JSON,
-keyed by unit action id (see `examples/costly_ra/costs.yaml`):
+Costs are central to the CRAC, not specific to costly remedial actions: `CracBuilder.build_crac()` calls
+`CracBuilder.apply_costs()` once all remedial actions are built. That step sets `activationCost` on the
+network (topological) actions and the injection range actions, and `variationCosts` on the range actions.
+The redispatch mapping itself writes no costs.
+
+Costs are **disabled by default**: without a cost config (`CRAC_COSTS_PATH = None`, `CracBuilder(costs=None)`)
+nothing is written and no cost warnings are logged. They are only needed for the MIN_COST objective. The
+config is YAML or JSON, keyed by remedial action id, or by name when the id isn't listed (topology actions
+use their mRID as id). See `examples/crac_costs.yaml`:
 
 ```yaml
 defaults:
-  activationCost: 100.0          # EUR per activation
-  variationCosts: {up: 50.0, down: 50.0}   # EUR/MW
-units:
-  RA_RD_KHES_G5:
+  activationCost: 100.0                    # EUR per activation, all remedial actions
+  variationCosts: {up: 50.0, down: 50.0}   # EUR/MW, range actions only
+remedialActions:
+  RA_RD_KHES_G5:                           # redispatch unit
     activationCost: 100.0
     variationCosts: {up: 50.0, down: 50.0}
   RA_RD_PHES_G1:
-    variationCosts: {down: 40.0}  # missing values fall back to defaults
+    variationCosts: {down: 40.0}           # missing values fall back to defaults
+  RA_LN316LV:                              # topological network action
+    activationCost: 20.0
 ```
 
-When costs are enabled, any value missing for a unit falls back to `defaults`, and a warning is logged for
-every unit that uses a default. Without a `defaults` section, the built-in defaults are
+Values missing for an action fall back to `defaults`. One warning per action type lists the actions that use
+defaults, and the details are logged at debug level. Without a `defaults` section, the built-in defaults are
 `activationCost: 0.0` and `variationCosts: {up: 1.0, down: 1.0}`.
 
 ### Example output
 
-Unit with both directions available (with costs enabled; without them `activationCost` and
+Unit with both directions available, after costs are applied (without a cost config, `activationCost` and
 `variationCosts` are left out):
 
 ```json
@@ -221,5 +229,5 @@ used by another range action. Everything else in the base CRAC is left untouched
     `max-ra-per-tso` is also set for the same TSO.
 - Multi-element (GSK-style) injection actions are out of scope; `redispatch_results` rejects them.
 
-Tests: `uv run pytest tests/test_costly_ra_crac.py tests/test_costly_ra_rao.py`. The TC1 CGMES round trip
+Tests: `uv run pytest tests/test_costly_ra_crac.py tests/test_costly_ra_rao.py tests/test_crac_costs.py`. The TC1 CGMES round trip
 needs the `test-data` submodule (`git submodule update --init test-data`) and is skipped without it.

@@ -10,7 +10,7 @@ from conftest import (
 from rao.crac import models
 from rao.crac.builder import CracBuilder
 from rao.crac.costly_ra import (
-    BIG, CostConfig, CracMergeError, CsvRowSource, NcRemedialActionRowSource, RowParseError, build_crac,
+    BIG, CracMergeError, CsvRowSource, NcRemedialActionRowSource, RowParseError, build_crac,
     build_injection_range_actions, check_ra_usage_limits, crac_to_json, merge_into_crac, normalize_element_id,
     unit_action_id,
 )
@@ -21,14 +21,6 @@ PHES_G3 = "_4df6a958-ba01-40ca-bcdc-c71e464681df"
 
 ABSOLUTE = "absolute"
 RELATIVE = "relativeToInitialNetwork"
-
-SAMPLE_COSTS = CostConfig.from_dict({
-    "defaults": {"activationCost": 100.0, "variationCosts": {"up": 50.0, "down": 50.0}},
-    "units": {
-        "RA_RD_KHES_G5": {"activationCost": 100.0, "variationCosts": {"up": 50.0, "down": 50.0}},
-        "RA_RD_PHES_G1": {"activationCost": 100.0, "variationCosts": {"up": 50.0, "down": 50.0}},
-    },
-})
 
 
 def _single(result):
@@ -116,7 +108,7 @@ def test_nc_profile_maps_ranges_and_availability_from_remedial_actions(tmp_path)
         nc_remedial_action("RA_Q_NL_G2", "_nl-g2", "upAndDown", -60.0, property_name="RotatingMachine.q"),
         tmp_path=tmp_path,
     )
-    result = build_injection_range_actions(NcRemedialActionRowSource(data).read(), costs=SAMPLE_COSTS)
+    result = build_injection_range_actions(NcRemedialActionRowSource(data).read())
     actions = {a["id"]: a for a in result.to_dicts()}
 
     assert sorted(actions) == ["RA_RD_KHES_G5", "RA_RD_KHES_G6", "RA_RD_ME_G1", "RA_RD_PHES_G1"]
@@ -136,7 +128,7 @@ def test_crac_builder_adds_redispatch_actions_without_network_model(tmp_path):
                            nc_unit("RA_RD_PHES_G1", PHES_G1, p_min=0.0, p_max=98.0, up=False), tmp_path=tmp_path)
     # Empty network triplets: ranges must not depend on the model
     empty_network = pd.DataFrame(columns=["ID", "KEY", "VALUE", "INSTANCE_ID"])
-    builder = CracBuilder(data=data, network=empty_network, redispatch_costs=SAMPLE_COSTS)
+    builder = CracBuilder(data=data, network=empty_network)
     builder._crac = models.Crac()
 
     result = builder.process_redispatch_actions()
@@ -146,7 +138,6 @@ def test_crac_builder_adds_redispatch_actions_without_network_model(tmp_path):
     assert [a["id"] for a in crac["injectionRangeActions"]] == ["RA_RD_KHES_G5", "RA_RD_PHES_G1"]
     assert crac["injectionRangeActions"][0] == {
         "id": "RA_RD_KHES_G5", "name": "RA_RD_KHES_G5", "operator": "https://energy.referencedata.eu/EIC/10X1001A1001B54W",
-        "activationCost": 100.0, "variationCosts": {"up": 50.0, "down": 50.0},
         "onInstantUsageRules": [{"instant": "curative"}], "networkElementIdsAndKeys": {KHES: 1.0},
         "ranges": [{"rangeType": "absolute", "min": 0.0, "max": 56.0}],
     }
@@ -173,7 +164,7 @@ def test_unit_action_id_strips_direction_suffix():
 
 def test_up_and_down_rows_merge_into_one_action():
     rows = CsvRowSource(EXAMPLES_DIR / "rd_rows.csv").read()
-    result = build_injection_range_actions(rows, costs=SAMPLE_COSTS)
+    result = build_injection_range_actions(rows)
 
     assert [a.id for a in result.actions] == ["RA_RD_KHES_G5", "RA_RD_PHES_G1"]
     khes = result.to_dicts()[0]
@@ -181,8 +172,6 @@ def test_up_and_down_rows_merge_into_one_action():
         "id": "RA_RD_KHES_G5",
         "name": "RA_RD_KHES_G5",
         "operator": "AST",
-        "activationCost": 100.0,
-        "variationCosts": {"up": 50.0, "down": 50.0},
         "onInstantUsageRules": [{"instant": "curative"}],
         "networkElementIdsAndKeys": {KHES: 1.0},
         "ranges": [{"rangeType": "absolute", "min": 0.0, "max": 56.0}],
@@ -317,63 +306,11 @@ def test_output_is_deterministic():
     assert [a["id"] for a in json.loads(expected)["injectionRangeActions"]] == ["RA_A", "RA_B", "RA_C"]
 
 
-# ---------------------------------------------------------------- costs
-
-
-def test_cost_config_overrides_defaults(log_messages):
-    costs = CostConfig.from_dict({
-        "defaults": {"activationCost": 10.0, "variationCosts": {"up": 20.0, "down": 30.0}},
-        "units": {"RA_A": {"activationCost": 1.0, "variationCosts": {"up": 2.0, "down": 3.0}},
-                  "RA_B": {"variationCosts": {"down": 7.0}}},
-    })
-    rows = unit_rows("RA_A", "G1", 0.0, 50.0) + unit_rows("RA_B", "G2", 0.0, 50.0) + unit_rows("RA_C", "G3", 0.0, 50.0)
-    result = build_injection_range_actions(rows, costs=costs)
-    actions = {a["id"]: a for a in result.to_dicts()}
-
-    assert (actions["RA_A"]["activationCost"], actions["RA_A"]["variationCosts"]) == (1.0, {"up": 2.0, "down": 3.0})
-    assert (actions["RA_B"]["activationCost"], actions["RA_B"]["variationCosts"]) == (10.0, {"up": 20.0, "down": 7.0})
-    assert (actions["RA_C"]["activationCost"], actions["RA_C"]["variationCosts"]) == (10.0, {"up": 20.0, "down": 30.0})
-
-    assert "RA_A" not in result.defaulted_costs
-    assert result.defaulted_costs["RA_B"] == ["activationCost", "variationCosts.up"]
-    assert result.defaulted_costs["RA_C"] == ["activationCost", "variationCosts.up", "variationCosts.down"]
-    assert any("RA_B: using default costs for activationCost, variationCosts.up" in m for m in log_messages)
-    assert any("RA_C: using default costs" in m for m in log_messages)
-    assert not any("RA_A: using default costs" in m for m in log_messages)
-
-
-def test_costs_are_silenced_without_cost_config(log_messages):
-    result = build_injection_range_actions(unit_rows("RA_A", "G1", 0.0, 50.0))
-    action = _single(result)
+def test_redispatch_actions_carry_no_costs():
+    """Costs are assigned centrally (rao.crac.costs), not by the redispatch mapping."""
+    action = _single(build_injection_range_actions(unit_rows("RA_A", "G1", 0.0, 50.0)))
     assert "activationCost" not in action
     assert "variationCosts" not in action
-    assert result.defaulted_costs == {}
-    assert not any("cost" in m for m in log_messages)
-    assert "default costs" not in result.summary()
-
-
-def test_cost_config_builtin_defaults():
-    action = _single(build_injection_range_actions(unit_rows("RA_A", "G1", 0.0, 50.0), costs=CostConfig()))
-    assert action["activationCost"] == 0.0
-    assert action["variationCosts"] == {"up": 1.0, "down": 1.0}
-
-
-def test_cost_config_from_yaml_file(tmp_path):
-    path = tmp_path / "costs.yaml"
-    path.write_text("units:\n  RA_A:\n    activationCost: 5\n    variationCosts: {up: 6, down: 7}\n")
-    cost, defaulted = CostConfig.from_file(path).resolve("RA_A")
-    assert (cost.activation_cost, cost.up, cost.down, defaulted) == (5.0, 6.0, 7.0, [])
-
-
-@pytest.mark.parametrize("data, message", [
-    ({"unit": {}}, "Unknown sections"),
-    ({"units": {"RA_A": {"activation": 1.0}}}, "Unknown keys"),
-    ({"units": {"RA_A": {"activationCost": -1.0}}}, "must not be negative"),
-    ({"units": {"RA_A": {"variationCosts": {"up": "cheap"}}}}, "must be a number"),
-])
-def test_cost_config_rejects_invalid_values(data, message):
-    with pytest.raises(ValueError, match=message):
-        CostConfig.from_dict(data).resolve("RA_A")
 
 
 # ---------------------------------------------------------------- CRAC assembly

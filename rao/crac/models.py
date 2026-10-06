@@ -153,6 +153,7 @@ class NetworkAction(BaseModel):
     id: str
     name: str
     operator: str
+    activationCost: Optional[float] = None  # set by rao.crac.costs when a cost config is given
     onInstantUsageRules: List[Dict]
     terminalsConnectionActions: Optional[List[TerminalsAction]] = None
     shuntCompensatorPositionActions: Optional[List[ShuntCompensatorPositionAction]] = None

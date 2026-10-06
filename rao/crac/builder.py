@@ -7,7 +7,8 @@ from rao.crac import models
 import json
 from common.decorators import performance_counter
 from rao.crac.context import CracWorkaroundContext
-from rao.crac.costly_ra import CostConfig, NcRemedialActionRowSource, build_injection_range_actions
+from rao.crac.costly_ra import NcRemedialActionRowSource, build_injection_range_actions
+from rao.crac.costs import CostConfig
 
 
 class CracBuilder:
@@ -23,14 +24,14 @@ class CracBuilder:
     EXCLUDED_MODEL_AUTHORS = ()
 
     def __init__(self, data: pd.DataFrame, network: pd.DataFrame | None, workaround: CracWorkaroundContext | None = None,
-                 redispatch_costs: CostConfig | None = None):
+                 costs: CostConfig | None = None):
         logger.info(f"CRAC builder initialized")
         self.data = data
         self.network = network
         self.limits = None
         self._crac = None
         self.workaround = workaround or CracWorkaroundContext()
-        self.redispatch_costs = redispatch_costs
+        self.costs = costs
 
         # BaseVoltage nominal voltages live in the EQ boundary file, capture them before it is excluded
         self.base_voltages = {}
@@ -1143,11 +1144,11 @@ class CracBuilder:
         Retrieved from the same remedial action data (NC RemedialAction profile) as the topology
         actions. Pmin/Pmax come from the StaticPropertyRange normalValue of the DOWN/UP alterations
         and availability from normalAvailable/normalEnabled; the network model is not used.
-        Costs are only written when redispatch_costs is given (not needed for MAX_MIN_MARGIN).
+        Costs are assigned afterwards for all remedial actions by apply_costs().
         See rao.crac.costly_ra.redispatch for the mapping rules.
         """
         rows = NcRemedialActionRowSource(self.data).read()
-        result = build_injection_range_actions(rows, costs=self.redispatch_costs, instant=instant)
+        result = build_injection_range_actions(rows, instant=instant)
         logger.info(f"Redispatch remedial actions:\n{result.summary()}")
         if result.actions:
             self._crac.injectionRangeActions = list(self._crac.injectionRangeActions or []) + result.actions
@@ -1281,6 +1282,24 @@ class CracBuilder:
             )
 
     @performance_counter(units='seconds')
+    def apply_costs(self) -> dict[str, list[str]]:
+        """
+        Assign costs (rao.crac.costs) to all remedial actions of the CRAC: activationCost on
+        network (topological) actions and injection range actions, variationCosts on range
+        actions. Without a cost config nothing is written (MAX_MIN_MARGIN does not use costs).
+        Returns {action id: cost values taken from defaults}.
+        """
+        if self.costs is None:
+            logger.debug("No remedial action cost config, costs are not written to the CRAC")
+            return {}
+
+        defaulted = {}
+        defaulted.update(self.costs.apply(self._crac.networkActions, action_type="network action"))
+        defaulted.update(self.costs.apply(self._crac.injectionRangeActions or [], action_type="injection range action"))
+        logger.info(f"Remedial action costs assigned to {len(self._crac.networkActions)} network actions and "
+                    f"{len(self._crac.injectionRangeActions or [])} injection range actions")
+        return defaulted
+
     def build_crac(self, contingency_ids: list | None = None, include_redispatch: bool = False,
                    redispatch_instant: str = "curative"):
 
@@ -1312,6 +1331,9 @@ class CracBuilder:
         # Redispatching injection range actions are opt-in
         if include_redispatch:
             self.process_redispatch_actions(instant=redispatch_instant)
+
+        # Assign remedial action costs, once all remedial actions are built
+        self.apply_costs()
 
         # Update the CRAC flowCNEC limits from network
         self.update_limits_from_network()
