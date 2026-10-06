@@ -30,7 +30,7 @@
         "linear-optimization-solver" : {
           "solver" : "CBC",
           "relative-mip-gap" : 0.001,
-          "solver-specific-parameters" : "THREADS 10 MAXTIME 3000"
+          "solver-specific-parameters" : ""
         }
       },
       "topological-actions-optimization" : {
