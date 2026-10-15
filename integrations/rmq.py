@@ -18,6 +18,7 @@ class BlockingClient:
     def __init__(self,
                  host: str = RMQ_SERVER,
                  port: int = int(RMQ_PORT),
+                 vhost: str = RMQ_VHOST,
                  username: str = RMQ_USERNAME,
                  password: str = RMQ_PASSWORD,
                  message_converter: object | None = None,
@@ -26,6 +27,7 @@ class BlockingClient:
         self.connection_params = {
             'host': host,
             'port': port,
+            'virtual_host': vhost,
             'credentials': pika.PlainCredentials(username, password)
         }
         self.message_converter = message_converter
@@ -41,14 +43,20 @@ class BlockingClient:
         self.publish_channel = self.connection.channel()
         self.consume_channel = self.connection.channel()
 
-    def publish(self, payload: str, exchange_name: str, headers: dict | None = None, routing_key: str = ''):
+    def publish(self,
+                payload: str,
+                exchange_name: str,
+                headers: dict | None = None,
+                routing_key: str = '',
+                delivery_mode: int | None = None):
         # Publish message
         self.publish_channel.basic_publish(
             exchange=exchange_name,
             routing_key=routing_key,
             body=payload,
             properties=pika.BasicProperties(
-                headers=headers
+                headers=headers,
+                delivery_mode=delivery_mode,
             )
         )
 

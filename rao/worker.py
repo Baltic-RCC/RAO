@@ -15,9 +15,9 @@ parse_app_properties(caller_globals=globals(),
 # Set worker name and unique id to Elastic log handler
 worker_id = str(uuid4())
 if getattr(config.initialize_logging, 'elastic_handler', None):
-    config.initialize_logging.elastic_handler.extra.update({'worker': 'optimizer', 'worker_id': worker_id})
+    config.initialize_logging.elastic_handler.extra.update({'worker': 'optimizer-preparer', 'worker_id': worker_id})
 
-logger.info(f"Starting 'optimizer' worker with assigned trace id: {worker_id}")
+logger.info(f"Starting 'optimizer-preparer' worker with assigned trace id: {worker_id}")
 
 if CONSUMER_TYPE == "SINGLE_MESSAGE":
     # RabbitMQ single message consumer implementation aligned with KEDA usage

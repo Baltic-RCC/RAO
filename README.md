@@ -36,3 +36,20 @@ flowchart TD
 
 
 
+
+# RAO workers
+
+The optimization runs as two deployments built from the same `rao` image:
+
+| Worker | Entrypoint | Queue in | Does |
+|---|---|---|---|
+| preparer | `rao/worker.py` | `rao.violations` | Filters SAR violations, prepares network (3w trafo + low-Z workarounds, initial LF), builds a CRAC per contingency, stores network (XIIDM) and CRACs in S3, publishes one task per contingency to `rao.optimization` |
+| optimizer | `rao/optimizer_worker.py` | `rao.optimization` | Loads prepared network and CRAC from S3, runs RAO trying the profiles in `rao/parameters/profiles.py` in order until one succeeds, post-processes and sends results to Elastic |
+
+Optimization task headers carry the original message headers plus `contingency-id`, `batch-id` and `batch-size`.
+Results are published per contingency, the `settings.profile` field shows which RAO profile produced them.
+
+Infrastructure required outside this repository:
+- exchange `rao.optimization` bound to queue `rao.optimization`
+- KEDA ScaledJob for the optimizer with `command: ["python", "rao/optimizer_worker.py"]`
+- S3 lifecycle rule expiring prepared networks under `RAO/PREPARED/`
