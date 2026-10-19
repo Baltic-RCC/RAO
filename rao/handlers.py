@@ -17,6 +17,7 @@ from common.decorators import performance_counter
 from rao.crac.builder import CracBuilder
 from rao.crac.context import CracWorkaroundContext
 from rao.crac.costs import CostConfig
+from rao.costly_ra import use_min_cost
 from rao.parameters.manager import RaoSettingsManager
 from rao.parameters.manager import LoadflowSettingsManager
 from rao.optimizer import Optimizer
@@ -102,6 +103,29 @@ def build_applied_actions(rao_results: dict, crac: dict) -> list[dict]:
             value = action_type if action_type is not None else section_count
             entry['label'] = " | ".join(
                 str(part) for part in (entry['name'] or action_id, entry['instant'], value)
+                if part is not None
+            )
+            applied_actions.append(entry)
+
+    # Range actions (redispatch): one entry per activated state, with the optimized set-point
+    crac_range_actions = {a['id']: a for a in crac.get('injectionRangeActions') or []}
+    for action_result in rao_results.get('rangeActionResults', []):
+        action_id = action_result.get('rangeActionId')
+        crac_action = crac_range_actions.get(action_id, {})
+        for state in (action_result.get('activatedStates') or []):
+            entry = {
+                'id': action_id,
+                'name': crac_action.get('name'),
+                'operator': crac_action.get('operator'),
+                'instant': state.get('instant'),
+                'contingencyId': state.get('contingency'),
+                'elementaryType': 'injectionRange',
+                'networkElementIds': list(crac_action.get('networkElementIdsAndKeys') or {}),
+                'initialSetpoint': action_result.get('initialSetpoint'),
+                'setpoint': state.get('setpoint'),
+            }
+            entry['label'] = " | ".join(
+                str(part) for part in (entry['name'] or action_id, entry['instant'], entry['setpoint'])
                 if part is not None
             )
             applied_actions.append(entry)
@@ -345,26 +369,26 @@ class HandlerVirtualOperator:
         # Normalize thresholds
         results = pd.json_normalize(results.explode("cnec.thresholds").to_dict('records'))
 
-        # Explode and flatten network actions
-        ## Check if there are any actions received from optimizer
-        _optimized_actions_flag = bool(actions.apply(lambda col: col.map(lambda x: x != [])).values.any())
-        if _optimized_actions_flag:
-            actions = pd.json_normalize(actions['networkActionResults'].explode())
-            actions = pd.json_normalize(actions.explode("activatedStates").to_dict("records"))
-
+        # Flatten network and range actions, one row per (action, activated state)
+        actions = pd.json_normalize([
+            {**action, 'actionId': action.get('networkActionId') or action.get('rangeActionId'), 'activatedStates': state}
+            for column in _cols_to_pop for row in actions[column] for action in (row or [])
+            for state in (action.get('activatedStates') or [])
+        ])
+        if not actions.empty:
             # Combine dataframes
             results = results.merge(actions,
                                     how='left',
                                     left_on=["cnec.instant", "cnec.contingencyId"],
                                     right_on=["activatedStates.instant", "activatedStates.contingency"])
 
-            # Map network action data
-            action_df = pd.DataFrame(self.crac['networkActions'])
+            # Map network and injection range action data
+            action_df = pd.DataFrame(self.crac.get('networkActions', []) + (self.crac.get('injectionRangeActions') or []))
             if not action_df.empty:
                 action_df.columns = [f"action.{col}" for col in action_df.columns]
                 results = results.merge(action_df,
                                         how='left',
-                                        left_on='networkActionId',
+                                        left_on='actionId',
                                         right_on='action.id').drop(columns='action.id')
 
         # TODO - explode by optimized network actions
@@ -558,6 +582,9 @@ class HandlerVirtualOperator:
 
         # Get default optimization parameters
         optimizer_settings = RaoSettingsManager()
+        if RAO_OBJECTIVE == "MIN_COST":
+            use_min_cost(optimizer_settings)
+        logger.info(f"RAO objective function: {optimizer_settings.get('objective-function.type')}")
 
         # Create CRAC service
         logger.info(f"Loading network to triplets for CRAC service")

@@ -18,6 +18,16 @@ MIN_COST_PARAMETERS_PATH = Path(__file__).parent.joinpath("parameters", "rao_v34
 _DC_KEY = ("extensions.open-rao-search-tree-parameters.load-flow-and-sensitivity-computation."
            "sensitivity-parameters.load-flow-parameters.dc")
 
+# Turns the worker parameters (rao_v34.json, AC) into MIN_COST parameters
+MIN_COST_OVERRIDES = {
+    "objective-function.type": "MIN_COST",
+    "extensions.open-rao-search-tree-parameters.range-actions-optimization.pst-model": "APPROXIMATED_INTEGERS",
+    "extensions.open-rao-search-tree-parameters.costly-min-margin-parameters": {
+        "shifted-violation-penalty": 10000.0,
+        "shifted-violation-threshold": 5.0,
+    },
+}
+
 RESULT_COLUMNS = ["action_id", "generator_id", "instant", "contingency", "initial_p", "optimized_p", "delta"]
 
 
@@ -41,6 +51,16 @@ def load_min_cost_parameters(path: str | Path = MIN_COST_PARAMETERS_PATH,
         settings.set(overrides)
     logger.info(f"Loading MIN_COST RAO parameters from {path} ({'DC' if dc else 'AC'})")
     return pypowsybl.rao.Parameters.from_buffer_source(settings.to_bytesio())
+
+
+def use_min_cost(settings: RaoSettingsManager) -> RaoSettingsManager:
+    """
+    Switch RAO parameters to the MIN_COST objective in place, keeping their load flow settings.
+    Under MIN_COST the RaoResult reports a remaining negative margin as
+    costResults[<instant>]["virtualCost"]["min-margin-violation-evaluator"] > 0.
+    """
+    settings.set(MIN_COST_OVERRIDES)
+    return settings
 
 
 def run_rao(network: pypowsybl.network.Network,

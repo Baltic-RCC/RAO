@@ -5,7 +5,8 @@ from conftest import nc_unit, read_nc_profile, triangle_network
 from rao.crac import models
 from rao.crac.builder import CracBuilder
 from rao.crac.costly_ra import import_crac
-from rao.crac.costs import CostConfig
+from rao.crac.costs import (ACTIVATION_COST_BY_TYPE, OPPOSITE_DIRECTION_SUFFIX, CostConfig,
+                            injection_range_action_types, network_action_types)
 
 COSTS = CostConfig.from_dict({
     "defaults": {"activationCost": 10.0, "variationCosts": {"up": 20.0, "down": 30.0}},
@@ -71,7 +72,7 @@ def test_apply_sets_activation_cost_on_network_actions_and_variation_costs_on_ra
 
 
 def test_apply_warning_lists_at_most_ten_actions(log_messages):
-    CostConfig().apply([_network_action(f"TOPO_{i:02d}") for i in range(12)], action_type="network action")
+    COSTS.apply([_network_action(f"TOPO_{i:02d}") for i in range(12)], action_type="network action")
     warning = next(m for m in log_messages if "use default costs" in m)
     assert "12 of 12 network actions" in warning and "... (2 more)" in warning
 
@@ -85,6 +86,7 @@ def test_cost_config_from_yaml_file(tmp_path):
 
 @pytest.mark.parametrize("data, message", [
     ({"units": {}}, "Unknown sections"),
+    ({"activationCosts": {"pst": 1.0}}, "activationCosts"),
     ({"remedialActions": {"RA_A": {"activation": 1.0}}}, "Unknown keys"),
     ({"remedialActions": {"RA_A": {"activationCost": -1.0}}}, "must not be negative"),
     ({"remedialActions": {"RA_A": {"variationCosts": {"up": "cheap"}}}}, "must be a number"),
@@ -116,15 +118,42 @@ def test_build_crac_assigns_costs_to_topology_and_redispatch_actions(tmp_path):
     assert crac["networkActions"][0]["activationCost"] == 5.0
     ranges = {a["id"]: a for a in crac["injectionRangeActions"]}
     assert (ranges["RA_A"]["activationCost"], ranges["RA_A"]["variationCosts"]) == (1.0, {"up": 2.0, "down": 3.0})
-    assert (ranges["RA_B"]["activationCost"], ranges["RA_B"]["variationCosts"]) == (10.0, {"up": 20.0, "down": 7.0})
+    # Type cost (redispatch) wins over defaults.activationCost
+    assert (ranges["RA_B"]["activationCost"], ranges["RA_B"]["variationCosts"]) == (1000.0, {"up": 20.0, "down": 7.0})
 
 
-def test_build_crac_without_cost_config_writes_no_costs(tmp_path, log_messages):
+def test_build_crac_without_cost_config_writes_type_costs(tmp_path, log_messages):
     crac = _builder(tmp_path, None).build_crac(include_redispatch=True)
 
-    assert "activationCost" not in crac["networkActions"][0]
-    assert all("activationCost" not in a and "variationCosts" not in a for a in crac["injectionRangeActions"])
+    assert crac["networkActions"][0]["activationCost"] == ACTIVATION_COST_BY_TYPE["networkAction"]
+    assert all(a["activationCost"] == ACTIVATION_COST_BY_TYPE["redispatch"] for a in crac["injectionRangeActions"])
+    assert all(a["variationCosts"] == {"up": 1.0, "down": 1.0} for a in crac["injectionRangeActions"])
     assert not any("cost" in m for m in log_messages)
+
+
+def test_activation_cost_order_by_type():
+    order = ["topologyUpAndDown", "networkAction", "countertrade", "redispatch"]
+    assert [ACTIVATION_COST_BY_TYPE[t] for t in order] == sorted(ACTIVATION_COST_BY_TYPE.values())
+
+
+def test_network_action_types_detect_up_and_down_pairs():
+    actions = [_network_action("TOPO_1"), _network_action(f"TOPO_1{OPPOSITE_DIRECTION_SUFFIX}"),
+               _network_action("TOPO_2")]
+    assert network_action_types(actions) == {"TOPO_1": "topologyUpAndDown",
+                                             f"TOPO_1{OPPOSITE_DIRECTION_SUFFIX}": "topologyUpAndDown",
+                                             "TOPO_2": "networkAction"}
+
+
+def test_type_costs_from_config_and_per_action_override():
+    config = CostConfig.from_dict({"activationCosts": {"redispatch": 500.0},
+                                   "remedialActions": {"RA_B": {"activationCost": 7.0}}})
+    actions = [_network_action("TOPO_1"), _network_action(f"TOPO_1{OPPOSITE_DIRECTION_SUFFIX}"),
+               _injection_action("RA_A"), _injection_action("RA_B")]
+    types = {**network_action_types(actions[:2]), **injection_range_action_types(actions[2:])}
+
+    config.apply(actions, types=types)
+
+    assert [a.activationCost for a in actions] == [1.0, 1.0, 500.0, 7.0]
 
 
 def test_costed_crac_is_imported_by_openrao(tmp_path):

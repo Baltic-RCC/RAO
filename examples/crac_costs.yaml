@@ -1,8 +1,13 @@
 # Remedial action costs for the CRAC (rao.crac.costs), used by the MIN_COST objective.
 # Keyed by remedial action id or name. activationCost applies to every remedial action,
-# variationCosts (EUR/MW) to range actions only. Missing values fall back to 'defaults'.
+# variationCosts (EUR/MW) to range actions only. A missing activationCost falls back to the
+# action type cost in 'activationCosts', other missing values to 'defaults'.
+activationCosts:              # EUR per activation per type, cheapest first (built-in values shown)
+  topologyUpAndDown: 1.0      # topology action with 'upAndDown' range (id and id + '-opposite-direction')
+  networkAction: 10.0
+  countertrade: 100.0
+  redispatch: 1000.0
 defaults:
-  activationCost: 100.0       # EUR per activation
   variationCosts:
     up: 50.0                  # EUR/MW
     down: 50.0                # EUR/MW

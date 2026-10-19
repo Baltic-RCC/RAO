@@ -2,14 +2,14 @@
 import pandas as pd
 import pypowsybl
 import pytest
-from conftest import TC1_CGMES, nc_unit, read_nc_profile, triangle_network, unit_rows
+from conftest import TC1_CGMES, create_network, nc_unit, read_nc_profile, triangle_network, unit_rows
 from rao.crac import models
 from rao.crac.builder import CracBuilder
 from rao.crac.costly_ra import build_crac, build_injection_range_actions, merge_into_crac, validate_crac
-from rao.crac.costs import CostConfig
+from rao.crac.costs import ACTIVATION_COST_BY_TYPE, CostConfig, injection_range_action_types
 from rao.parameters.loadflow import CGMES_IMPORT_PARAMETERS
 from rao.parameters.manager import RaoSettingsManager
-from rao.costly_ra import apply_redispatch, load_min_cost_parameters, redispatch_results, run_rao
+from rao.costly_ra import apply_redispatch, load_min_cost_parameters, redispatch_results, run_rao, use_min_cost
 
 COSTS = CostConfig.from_dict({
     "defaults": {"activationCost": 100.0, "variationCosts": {"up": 10.0, "down": 10.0}},
@@ -259,3 +259,34 @@ def test_redispatch_results_warns_on_imbalance(log_messages):
 
     assert results["delta"].tolist() == [-20.0, 10.0]
     assert any("preventive/- is not balanced: sum of deltas = -10.000 MW" in m for m in log_messages)
+
+
+def test_worker_min_cost_prefers_topology_over_redispatch():
+    """
+    Worker parameters (AC) switched to MIN_COST with the built-in type costs: closing the spare
+    line L13c (networkAction tier) solves the curative overload, so redispatch stays unused.
+    """
+    network = create_network(
+        lines=[("L12", "B1", "B2", 10.0), ("L13a", "B1", "B3", 20.0), ("L13b", "B1", "B3", 20.0),
+               ("L13c", "B1", "B3", 20.0), ("L23", "B2", "B3", 10.0)],
+        generators=[("_GEN_A", "B1", 0.0, 500.0, 400.0), ("_GEN_B", "B2", 0.0, 800.0, 400.0)],
+        loads=[("LOAD", "B3", 800.0)])
+    network.update_lines(id="L13c", connected1=False, connected2=False)
+    rows = unit_rows("RA_A", "GEN_A", 0.0, 500.0) + unit_rows("RA_B", "GEN_B", 0.0, 800.0)
+    ranges = build_injection_range_actions(rows).actions
+    CostConfig().apply(ranges, types=injection_range_action_types(ranges))
+    crac = merge_into_crac(_curative_base_crac(), ranges)
+    crac["networkActions"] = [{
+        "id": "CLOSE_L13c", "name": "CLOSE_L13c", "operator": "AST",
+        "activationCost": ACTIVATION_COST_BY_TYPE["networkAction"],
+        "onInstantUsageRules": [{"instant": "curative"}],
+        "terminalsConnectionActions": [{"networkElementId": "L13c", "actionType": "close"}]}]
+    parameters = pypowsybl.rao.Parameters.from_buffer_source(use_min_cost(RaoSettingsManager()).to_bytesio())
+
+    result = run_rao(network, validate_crac(network, crac), parameters).to_json()
+
+    assert [a["networkActionId"] for a in result["networkActionResults"]] == ["CLOSE_L13c"]
+    assert not any(a.get("activatedStates") for a in result["rangeActionResults"])
+    curative = result["costResults"]["curative"]
+    assert curative["functionalCost"] == pytest.approx(ACTIVATION_COST_BY_TYPE["networkAction"])
+    assert curative["virtualCost"]["min-margin-violation-evaluator"] == pytest.approx(0.0)

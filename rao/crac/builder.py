@@ -8,7 +8,8 @@ import json
 from common.decorators import performance_counter
 from rao.crac.context import CracWorkaroundContext
 from rao.crac.costly_ra import NcRemedialActionRowSource, build_injection_range_actions
-from rao.crac.costs import CostConfig
+from rao.crac.costs import (CostConfig, OPPOSITE_DIRECTION_SUFFIX, injection_range_action_types,
+                            network_action_types)
 
 
 class CracBuilder:
@@ -1131,7 +1132,7 @@ class CracBuilder:
                 logger.debug(f"Remedial action defined with 'upAndDown' direction, adding opposite terminal connection actions")
                 _opposite_terminal_actions = [x.model_copy(update={"actionType": _get_opposite_terminal_connection_value(x.actionType)}) for x in actions]
                 _updates = {
-                    "id": f"{data['IdentifiedObject.mRID_GridStateAlterationRemedialAction'].iloc[0]}-opposite-direction",
+                    "id": f"{data['IdentifiedObject.mRID_GridStateAlterationRemedialAction'].iloc[0]}{OPPOSITE_DIRECTION_SUFFIX}",
                     "terminalsConnectionActions": _opposite_terminal_actions,
                 }
                 opposite_network_action = network_action.model_copy(update=_updates)
@@ -1317,16 +1318,20 @@ class CracBuilder:
         """
         Assign costs (rao.crac.costs) to all remedial actions of the CRAC: activationCost on
         network (topological) actions and injection range actions, variationCosts on range
-        actions. Without a cost config nothing is written (MAX_MIN_MARGIN does not use costs).
+        actions. Activation costs follow the remedial action type (cheapest first): upAndDown
+        topology actions, other network actions, countertrade, redispatch. Without a cost config
+        the built-in costs are used (MAX_MIN_MARGIN does not use costs).
         Returns {action id: cost values taken from defaults}.
         """
-        if self.costs is None:
-            logger.debug("No remedial action cost config, costs are not written to the CRAC")
-            return {}
+        costs = self.costs or CostConfig()
+        network_actions = self._crac.networkActions
+        injection_actions = self._crac.injectionRangeActions or []
 
         defaulted = {}
-        defaulted.update(self.costs.apply(self._crac.networkActions, action_type="network action"))
-        defaulted.update(self.costs.apply(self._crac.injectionRangeActions or [], action_type="injection range action"))
+        defaulted.update(costs.apply(network_actions, action_type="network action",
+                                     types=network_action_types(network_actions)))
+        defaulted.update(costs.apply(injection_actions, action_type="injection range action",
+                                     types=injection_range_action_types(injection_actions)))
         logger.info(f"Remedial action costs assigned to {len(self._crac.networkActions)} network actions and "
                     f"{len(self._crac.injectionRangeActions or [])} injection range actions")
         return defaulted

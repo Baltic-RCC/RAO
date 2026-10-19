@@ -175,3 +175,12 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Markdown files (already tracked files, e.g. README.md, stay tracked)
+*.md
+
+# Claude Code
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
