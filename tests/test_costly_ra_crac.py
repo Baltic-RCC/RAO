@@ -144,6 +144,38 @@ def test_crac_builder_adds_redispatch_actions_without_network_model(tmp_path):
     assert _ranges(crac["injectionRangeActions"][1]) == [(ABSOLUTE, 0.0, 98.0), (RELATIVE, -BIG, 0.0)]
 
 
+AST = "https://energy.referencedata.eu/EIC/10X1001A1001B54W"
+LITGRID = "https://energy.referencedata.eu/EIC/10X1001A1001A55Y"
+
+
+def _scoped_builder(tmp_path) -> CracBuilder:
+    """Redispatch units of two TSOs; CNECs on a line (AST), a 3W leg (LITGRID) and a line behind a Terminal."""
+    data = read_nc_profile(nc_unit("RA_RD_KHES_G5", KHES, 0.0, 56.0, operator="10X1001A1001B54W"),
+                           nc_unit("RA_RD_KRU_G1", "_kru-g1", 0.0, 225.0, operator="10X1001A1001A55Y"),
+                           tmp_path=tmp_path)
+    network = pd.DataFrame({"ID": ["T1", "T1"], "KEY": ["Type", "Terminal.ConductingEquipment"],
+                            "VALUE": ["Terminal", "line-ast-2"], "INSTANCE_ID": ["eq", "eq"]})
+    builder = CracBuilder(data=data, network=network)
+    builder._crac = models.Crac()
+    builder._crac.flowCnecs = [
+        models.FlowCnec(id=f"c-{element}", name=element, description="", networkElementId=element,
+                        operator=operator, thresholds=[models.Threshold()])
+        for element, operator in [("line-ast", AST), ("trafo-lt-Leg1", LITGRID), ("line-ast-2", AST)]]
+    return builder
+
+
+@pytest.mark.parametrize("violated, expected", [
+    (["_line-ast"], ["RA_RD_KHES_G5"]),
+    (["trafo-lt"], ["RA_RD_KRU_G1"]),                   # 3W base id matches its leg CNEC
+    (["T1"], ["RA_RD_KHES_G5"]),                         # SAR Terminal resolved to its equipment
+    (["trafo-lt", "line-ast"], ["RA_RD_KRU_G1"]),        # several TSOs: most loaded (first) wins
+    (["unknown"], []),                                   # no CNEC for the violation: no redispatch
+])
+def test_redispatch_scoped_to_violation_tso(tmp_path, violated, expected):
+    result = _scoped_builder(tmp_path).process_redispatch_actions(violated_element_ids=violated)
+    assert [a.id for a in result.actions] == expected
+
+
 def test_crac_builder_without_redispatch_actions_keeps_crac_unchanged(tmp_path):
     data = read_nc_profile(nc_remedial_action("RA_Q_NL_G2", "_nl-g2", "upAndDown", -60.0,
                                               property_name="RotatingMachine.q"), tmp_path=tmp_path)

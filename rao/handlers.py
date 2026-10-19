@@ -575,7 +575,11 @@ class HandlerVirtualOperator:
             logger.info(f"Violations on network elements: {data['PowerFlowResult.EquipmentName'].to_list()}")
 
             # Build CRAC for each contingency
-            self.crac = crac_service.build_crac(contingency_ids=[mrid], include_redispatch=CRAC_INCLUDE_REDISPATCH)
+            # Violated elements, most loaded first: redispatch is scoped to their TSO
+            violated_element_ids = data.sort_values("PowerFlowResult.value", ascending=False, key=pd.to_numeric)[
+                "PowerFlowResult.ACDCTerminal"].astype(str).tolist()
+            self.crac = crac_service.build_crac(contingency_ids=[mrid], include_redispatch=CRAC_INCLUDE_REDISPATCH,
+                                                violated_element_ids=violated_element_ids)
 
             # For debugging
             with open("test-crac-3w-testing.json", "w") as f:

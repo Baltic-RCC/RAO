@@ -1137,7 +1137,27 @@ class CracBuilder:
                 opposite_network_action = network_action.model_copy(update=_updates)
                 self._crac.networkActions.append(opposite_network_action)
 
-    def process_redispatch_actions(self, instant: str = "curative"):
+    def _violation_operator(self, violated_element_ids: list[str]) -> str | None:
+        """
+        TSO (CNEC operator) of the violated elements, taken from the CNECs already built.
+        SAR ACDCTerminal ids are resolved to their equipment when they are Terminals; 3W legs
+        ('-LegN') match their base transformer. Ids are ordered by loading, the first one wins.
+        """
+        operators = {}
+        for cnec in self._crac.flowCnecs:
+            operators.setdefault(re.sub(r"-Leg\d+$", "", str(cnec.networkElementId)).lstrip("_"), cnec.operator)
+
+        found = []
+        for element_id in violated_element_ids:
+            element_id = str(element_id).lstrip("_")
+            equipment = str(self._resolve_terminal_equipment(element_id) or element_id).lstrip("_")
+            if operator := operators.get(equipment):
+                found.append(operator)
+        if len(set(found)) > 1:
+            logger.warning(f"Violations in several TSOs {sorted(set(found))}, redispatch scoped to the most loaded: {found[0]}")
+        return found[0] if found else None
+
+    def process_redispatch_actions(self, instant: str = "curative", violated_element_ids: list[str] | None = None):
         """
         Redispatching RotatingMachineAction remedial actions -> one InjectionRangeAction per unit.
 
@@ -1145,9 +1165,20 @@ class CracBuilder:
         actions. Pmin/Pmax come from the StaticPropertyRange normalValue of the DOWN/UP alterations
         and availability from normalAvailable/normalEnabled; the network model is not used.
         Costs are assigned afterwards for all remedial actions by apply_costs().
+        With violated_element_ids, only the redispatch actions of the TSO that has the violation
+        are kept (see _violation_operator); without a TSO match no redispatch action is added.
         See rao.crac.costly_ra.redispatch for the mapping rules.
         """
         rows = NcRemedialActionRowSource(self.data).read()
+        if violated_element_ids is not None:
+            operator = self._violation_operator(violated_element_ids)
+            if operator is None:
+                logger.warning(f"No CNEC operator found for violated elements {list(violated_element_ids)}, "
+                               f"no redispatch actions added")
+                rows = []
+            else:
+                rows = [row for row in rows if row.party == operator]
+                logger.info(f"Redispatch scoped to violation TSO {operator}: {len(rows)} remedial action rows")
         result = build_injection_range_actions(rows, instant=instant)
         logger.info(f"Redispatch remedial actions:\n{result.summary()}")
         if result.actions:
@@ -1301,7 +1332,7 @@ class CracBuilder:
         return defaulted
 
     def build_crac(self, contingency_ids: list | None = None, include_redispatch: bool = False,
-                   redispatch_instant: str = "curative"):
+                   redispatch_instant: str = "curative", violated_element_ids: list[str] | None = None):
 
         # Initialize CRAC object
         self._crac = models.Crac()  # TODO can be replaced with separate function also need to include some general parameters
@@ -1330,7 +1361,7 @@ class CracBuilder:
 
         # Redispatching injection range actions are opt-in
         if include_redispatch:
-            self.process_redispatch_actions(instant=redispatch_instant)
+            self.process_redispatch_actions(instant=redispatch_instant, violated_element_ids=violated_element_ids)
 
         # Assign remedial action costs, once all remedial actions are built
         self.apply_costs()
