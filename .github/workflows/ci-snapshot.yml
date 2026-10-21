@@ -2,6 +2,7 @@ name: Build and publish snapshot
 
 permissions:
   contents: read
+  security-events: write
 
 on:
   push:
@@ -46,25 +47,42 @@ jobs:
           echo "IMAGE_TAG=$TAG" >> "$GITHUB_ENV"
           echo "Computed IMAGE_TAG=$TAG"
 
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: input_retriever/Dockerfile
+          load: true
+          tags: |
+            ${{ vars.DOCKER_USERNAME }}/${{ env.INPUT_RETRIEVER_PROJECT }}:${{ env.IMAGE_TAG }}
+            ${{ vars.DOCKER_USERNAME }}/${{ env.INPUT_RETRIEVER_PROJECT }}:${{ env.LATEST_TAG }}
+
+      - name: Scan input-retriever image
+        uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: ${{ vars.DOCKER_USERNAME }}/${{ env.INPUT_RETRIEVER_PROJECT }}:${{ env.IMAGE_TAG }}
+          category: trivy-input-retriever
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: rao/Dockerfile
+          load: true
+          tags: |
+            ${{ vars.DOCKER_USERNAME }}/${{ env.RAO_PROJECT }}:${{ env.IMAGE_TAG }}
+            ${{ vars.DOCKER_USERNAME }}/${{ env.RAO_PROJECT }}:${{ env.LATEST_TAG }}
+
+      - name: Scan optimizer image
+        uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: ${{ vars.DOCKER_USERNAME }}/${{ env.RAO_PROJECT }}:${{ env.IMAGE_TAG }}
+          category: trivy-optimizer
+
       - uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: input_retriever/Dockerfile
-          push: true
-          tags: |
-            ${{ vars.DOCKER_USERNAME }}/${{ env.INPUT_RETRIEVER_PROJECT }}:${{ env.IMAGE_TAG }}
-            ${{ vars.DOCKER_USERNAME }}/${{ env.INPUT_RETRIEVER_PROJECT }}:${{ env.LATEST_TAG }}
-            
-      - uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: rao/Dockerfile
-          push: true
-          tags: |
-            ${{ vars.DOCKER_USERNAME }}/${{ env.RAO_PROJECT }}:${{ env.IMAGE_TAG }}
-            ${{ vars.DOCKER_USERNAME }}/${{ env.RAO_PROJECT }}:${{ env.LATEST_TAG }}
+      - name: Push images
+        run: |
+          docker push --all-tags ${{ vars.DOCKER_USERNAME }}/${{ env.INPUT_RETRIEVER_PROJECT }}
+          docker push --all-tags ${{ vars.DOCKER_USERNAME }}/${{ env.RAO_PROJECT }}
