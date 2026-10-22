@@ -2,18 +2,13 @@ from pika import BasicProperties
 import uuid
 import json
 from datetime import datetime
-from pathlib import Path
 import pandas as pd
-import config
 from loguru import logger
 from integrations.elastic import Elastic
-from common.config_parser import parse_app_properties
 from common.rdf_converter import convert_cim_rdf_to_json, normalize_cim_payload
+from remedial_action_schedules.settings import SchedulesHandlerSettings
 
-parse_app_properties(caller_globals=globals(),
-                     path=str(Path(__file__).parent.joinpath("config.properties")),
-                     section="HANDLER",
-                     eval_types=True)
+handler_settings = SchedulesHandlerSettings()
 
 
 class HandlerRemedialActionScheduleToElastic:
@@ -26,7 +21,7 @@ class HandlerRemedialActionScheduleToElastic:
         # Convert message from NC to JSON
         data = convert_cim_rdf_to_json(rdfxml=message,
                                        root_class=["RemedialActionSchedule"],
-                                       key_mode=CONVERTER_KEY_MODE)
+                                       key_mode=handler_settings.converter_key_mode)
 
         # JSON normalize and transform to DataFrame
         df = normalize_cim_payload(payload=data, root_only=False)
@@ -37,7 +32,7 @@ class HandlerRemedialActionScheduleToElastic:
         data_to_send = df.astype(object).where(pd.notna(df), None).to_dict("records")
 
         response = self.elastic_service.send_to_elastic_bulk(
-            index=ELASTIC_SCHEDULES_INDEX,
+            index=handler_settings.elastic_schedules_index,
             json_message_list=data_to_send,
         )
 

@@ -6,23 +6,22 @@ import urllib3
 import sys
 import mimetypes
 import re
-import config
 import functools
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from aniso8601 import parse_datetime
-from common.config_parser import parse_app_properties
+from config.settings import MinioSettings
 from loguru import logger
 
 urllib3.disable_warnings()
 
-parse_app_properties(globals(), config.paths.integrations.minio)
+conf = MinioSettings()
 
 
 def renew_authentication_token(func):
     @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
-        if datetime.now(timezone.utc) >= self.token_expiration - timedelta(seconds=int(TOKEN_RENEW_MARGIN)):  # 120s margin before token expiration
+        if datetime.now(timezone.utc) >= self.token_expiration - timedelta(seconds=conf.token_renew_margin):  # 120s margin before token expiration
             logger.warning("Authentication token going to expire soon, renewing token")
             self._create_client()
         return func(self, *args, **kwargs)
@@ -32,13 +31,16 @@ def renew_authentication_token(func):
 
 class S3Minio:
 
-    def __init__(self, server: str = MINIO_SERVER, username: str = MINIO_USERNAME, password: str = MINIO_PASSWORD):
+    def __init__(self,
+                 server: str = conf.minio_server,
+                 username: str = conf.minio_username,
+                 password: str = conf.minio_password.get_secret_value()):
         self.server = server
         self.username = username
         self.password = password
         self.token_expiration = datetime.now(timezone.utc)
         self.http_client = urllib3.PoolManager(
-                maxsize=int(MAXSIZE),
+                maxsize=conf.maxsize,
                 cert_reqs='CERT_NONE',
             )
 
@@ -70,7 +72,7 @@ class S3Minio:
             "LDAPUsername": self.username,
             "LDAPPassword": self.password,
             "Version": version,
-            "DurationSeconds": TOKEN_EXPIRATION,
+            "DurationSeconds": conf.token_expiration,
         }
 
         # Sending request for temporary credentials and parsing it out from returned xml

@@ -1,9 +1,6 @@
-import os
 import uuid
 from datetime import datetime, timezone
-
 import pika
-from pika import BasicProperties
 from io import BytesIO
 import pandas as pd
 import numpy as np
@@ -11,10 +8,8 @@ import json
 import pypowsybl
 import itertools
 import config
-from pathlib import Path
 from typing import Any
-from common.object_storage import ObjectStorage
-from common.config_parser import parse_app_properties
+from common.object_storage import ObjectStorage, conf
 from common.decorators import performance_counter
 from rao.crac.builder import CracBuilder
 from rao.crac.context import CracWorkaroundContext
@@ -22,25 +17,18 @@ from rao.parameters.manager import RaoSettingsManager
 from rao.parameters.manager import LoadflowSettingsManager
 from rao.parameters.profiles import RAO_PROFILES
 from rao.optimizer import Optimizer
+from rao.settings import RaoHandlerSettings
 from rao.voltage_monitoring import build_applied_actions
 from rao.find_low_impedance_gap import find_threshold_gap_branches, zero_out
 from rao.voltage_monitoring import build_voltage_documents
 from loguru import logger
 
-parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
-parse_app_properties(caller_globals=globals(),
-                     path=str(Path(__file__).parent.joinpath("config.properties")),
-                     section="HANDLER_OPERATOR",
-                     eval_types=True)
-parse_app_properties(caller_globals=globals(),
-                     path=str(Path(__file__).parent.joinpath("config.properties")),
-                     section="HANDLER_OPTIMIZER",
-                     eval_types=True)
+conf = RaoHandlerSettings()
 
 
 class HandlerVirtualOperator:
 
-    def __init__(self, current_violations_only: bool = OPTIMIZE_ONLY_CURRENT_VIOLATIONS, debug: bool = DEBUG):
+    def __init__(self, current_violations_only: bool = conf.optimize_only_current_violations, debug: bool = conf.debug):
 
         self.current_violations_only = current_violations_only
         self.debug = debug
@@ -96,8 +84,8 @@ class HandlerVirtualOperator:
     def get_network_model(self, content_reference: str):
         # Query merge reports
         metadata = {'content_reference': content_reference}
-        self.network_model_meta = self.object_storage.query(metadata_query=metadata, index=ELASTIC_MODELS_INDEX)[0]
-        content = self.object_storage.get_content(metadata=self.network_model_meta, bucket_name=S3_BUCKET_IN_MODELS)
+        self.network_model_meta = self.object_storage.query(metadata_query=metadata, index=conf.elastic_models_index)[0]
+        content = self.object_storage.get_content(metadata=self.network_model_meta, bucket_name=conf.s3_bucket_in_models)
 
         return content
 
@@ -134,7 +122,7 @@ class HandlerVirtualOperator:
         violations = violations[violations["PowerFlowResult.isViolation"] == "true"]
 
         # Filter by violation deadband
-        violations = violations[violations["PowerFlowResult.value"] >= VIOLATION_THRESHOLD_PERCENT]
+        violations = violations[violations["PowerFlowResult.value"] >= conf.violation_threshold_percent]
 
         # Filter to current violations only if defined by configuration
         if self.current_violations_only:
@@ -154,7 +142,7 @@ class HandlerVirtualOperator:
         if 'ContingencyPowerFlowResult.Contingency' in violations.columns:
             _contingencies_count = len(violations['ContingencyPowerFlowResult.Contingency'].unique())
             logger.info(f"SAR profile contains number of unique contingencies: {_contingencies_count}")
-            if _contingencies_count > CONTINGENCIES_COUNT_THRESHOLD:
+            if _contingencies_count > conf.contingencies_count_threshold:
                 logger.error("Number of unique contingencies is above threshold and message can not be processed")
                 return message, properties
 
@@ -246,9 +234,9 @@ class HandlerVirtualOperator:
         batch_id = str(uuid.uuid4())
         file_prefix = f"{properties.headers['time-horizon']}_{self.scenario_timestamp:%Y%m%dT%H%M}"
         network_prepared = self.network.save_to_binary_buffer(format="XIIDM")
-        network_prepared.name = f"{S3_PREPARED_MODELS_PREFIX}/NETWORK_{file_prefix}_{batch_id}.zip"
+        network_prepared.name = f"{conf.s3_prepared_model_prefix}/NETWORK_{file_prefix}_{batch_id}.zip"
         self.object_storage.s3_service.upload_object(file_path_or_file_object=network_prepared,
-                                                     bucket_name=S3_BUCKET_IN_MODELS,
+                                                     bucket_name=conf.s3_bucket_in_models,
                                                      metadata=properties.headers)
 
         # Build CRAC per contingency and publish one optimization task for each
@@ -262,14 +250,14 @@ class HandlerVirtualOperator:
             crac_object = BytesIO(json.dumps(crac, ensure_ascii=False, indent=2).encode('utf-8'))
             crac_object.name = f"RAO/CRAC_{file_prefix}_CO_{mrid}.json"
             self.object_storage.s3_service.upload_object(file_path_or_file_object=crac_object,
-                                                         bucket_name=S3_BUCKET_RESULTS,
+                                                         bucket_name=conf.s3_bucket_results,
                                                          metadata=properties.headers)
 
             task = {
                 'contingency_id': mrid,
-                'network_bucket': S3_BUCKET_IN_MODELS,
+                'network_bucket': conf.s3_bucket_in_models,
                 'network_reference': network_prepared.name,
-                'crac_bucket': S3_BUCKET_RESULTS,
+                'crac_bucket': conf.s3_bucket_results,
                 'crac_reference': crac_object.name,
                 'loadflow_settings': _loadflow_settings_key,
                 'violation_terminals': data['PowerFlowResult.ACDCTerminal'].astype(str).tolist(),
@@ -294,7 +282,7 @@ class HandlerVirtualOperator:
 class HandlerOptimizer:
     """Run the RAO for a single contingency task published by HandlerVirtualOperator."""
 
-    def __init__(self, debug: bool = DEBUG):
+    def __init__(self, debug: bool = conf.debug):
         self.debug = debug
         self.object_storage = ObjectStorage()
 
@@ -415,8 +403,8 @@ class HandlerOptimizer:
 
     def publish_flow_results_to_elastic(self, results: pd.DataFrame):
         data_to_send = results.astype(object).where(pd.notna(results), None).to_dict("records")
-        logger.info(f"Sending optimization results to Elastic index: {ELASTIC_RESULTS_INDEX}")
-        self.object_storage.elastic_service.send_to_elastic_bulk(index=ELASTIC_RESULTS_INDEX,
+        logger.info(f"Sending optimization results to Elastic index: {conf.elastic_results_index}")
+        self.object_storage.elastic_service.send_to_elastic_bulk(index=conf.elastic_results_index,
                                                                  json_message_list=data_to_send)
 
     def publish_voltage_results_to_elastic(self, results: list):
@@ -424,7 +412,7 @@ class HandlerOptimizer:
         # Derive the document id so re-running a scenario overwrites its
         # results instead of adding a second copy of every document.
         self.object_storage.elastic_service.send_to_elastic_bulk(
-            index=ELASTIC_VOLTAGE_RESULTS_INDEX,
+            index=conf.elastic_voltage_results_index,
             json_message_list=results,
             id_from_metadata=True,
             id_metadata_list=['@time_horizon', '@scenario_timestamp', 'cnec_id', 'limit_type'],
@@ -525,7 +513,7 @@ if __name__ == '__main__':
         "time-horizon": "ID",
         "content-reference": "EMFOS/RMM/ID/RMM_15_002_20260923T2030Z_BA_44a93f61-0158-483d-8cfc-dfe8959099ec.zip",
     }
-    properties = BasicProperties(
+    properties = pika.BasicProperties(
         content_type='application/octet-stream',
         delivery_mode=2,
         priority=4,

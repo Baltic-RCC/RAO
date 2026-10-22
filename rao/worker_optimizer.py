@@ -1,16 +1,12 @@
 import config
 from integrations import rmq
 from rao.handlers import HandlerOptimizer
-from common.config_parser import parse_app_properties
+from rao.settings import OptimizerConsumerSettings
 from loguru import logger
-from pathlib import Path
 from uuid import uuid4
 import sys
 
-parse_app_properties(caller_globals=globals(),
-                     path=str(Path(__file__).parent.joinpath("config.properties")),
-                     section="CONSUMER_OPTIMIZER",
-                     eval_types=True)
+conf = OptimizerConsumerSettings()
 
 # Set worker name and unique id to Elastic log handler
 worker_id = str(uuid4())
@@ -19,17 +15,17 @@ if getattr(config.initialize_logging, 'elastic_handler', None):
 
 logger.info(f"Starting 'rao-optimizer' worker with assigned trace id: {worker_id}")
 
-if CONSUMER_TYPE == "SINGLE_MESSAGE":
+if conf.consumer_type == "SINGLE_MESSAGE":
     # RabbitMQ single message consumer implementation aligned with KEDA usage
     consumer = rmq.SingleMessageConsumer(
-        queue=RMQ_QUEUE_IN,
+        queue=conf.rmq_queue_in,
         message_handlers=[HandlerOptimizer()],
     )
     sys.exit(consumer.run())
-elif CONSUMER_TYPE == "LONG_LIVING":
+elif conf.consumer_type == "LONG_LIVING":
     # RabbitMQ long-living consumer implementation
     consumer = rmq.RMQConsumer(
-        queue=RMQ_QUEUE_IN,
+        queue=conf.rmq_queue_in,
         message_handlers=[HandlerOptimizer()],
     )
     try:
@@ -37,4 +33,4 @@ elif CONSUMER_TYPE == "LONG_LIVING":
     except KeyboardInterrupt:
         consumer.stop()
 else:
-    raise Exception("Unknown CONSUMER_TYPE, please check the config.properties file")
+    raise Exception(f"Unknown CONSUMER_TYPE: {conf.consumer_type}")

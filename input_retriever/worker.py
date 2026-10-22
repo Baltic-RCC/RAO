@@ -1,17 +1,13 @@
 import config
 from integrations import rmq
 from input_retriever.handlers import HandlerMetadataToObjectStorage, HandlerInputDataToElastic
-from common.config_parser import parse_app_properties
+from input_retriever.settings import InputRetrieverConsumerSettings
 from loguru import logger
-from pathlib import Path
 from uuid import uuid4
 import signal
 
 
-parse_app_properties(caller_globals=globals(),
-                     path=str(Path(__file__).parent.joinpath("config.properties")),
-                     section="CONSUMER",
-                     eval_types=True)
+consumer_settings = InputRetrieverConsumerSettings()
 
 
 # Set worker name and unique id to Elastic log handler
@@ -23,10 +19,10 @@ if getattr(config.initialize_logging, 'elastic_handler', None):
 # RabbitMQ consumer implementation
 logger.info(f"Starting {worker_name} worker with assigned trace id: {worker_id}")
 handlers = [HandlerMetadataToObjectStorage()]
-if ENABLE_DATA_STORAGE_HANDLER:
+if consumer_settings.enable_data_storage_handler:
     handlers.append(HandlerInputDataToElastic())
 consumer = rmq.RMQConsumer(
-    queue=RMQ_QUEUE_IN,
+    queue=consumer_settings.rmq_queue_in,
     message_handlers=handlers,
 )
 

@@ -1,16 +1,15 @@
 import datetime
 import pandas as pd
 import sys
-import config
 from typing import List, Dict
 from io import BytesIO
 from loguru import logger
-from common.config_parser import parse_app_properties
+from config.settings import ObjectStorageSettings
 from integrations.s3_storage import S3Minio
 from integrations.elastic import Elastic
 
 
-parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
+conf = ObjectStorageSettings()
 
 # Metadata fields identifying the party that published an input profile, most
 # specific first. Records published over EDX carry only 'publisher'.
@@ -52,7 +51,7 @@ class ObjectStorage:
               metadata_query: Dict,
               range_query: List[Dict] | None = None,
               query_filter: List[Dict] | None = None,
-              index: str = ELASTIC_METADATA_INDEX,
+              index: str = conf.elastic_metadata_index,
               return_payload: bool = False,
               size: str = '10000',
               sort: Dict | None = None,
@@ -142,7 +141,7 @@ class ObjectStorage:
                                      scenario_timestamp: str | datetime.datetime,
                                      # in case of str type it should be ISO compatible
                                      entity: List | None = None,
-                                     index: str = ELASTIC_METADATA_INDEX,
+                                     index: str = conf.elastic_metadata_index,
                                      ):
 
         logger.info(f"Retrieving input data files of keyword: {type_keyword}")
@@ -192,7 +191,7 @@ class ObjectStorage:
                                         scenario_timestamp: str | datetime.datetime,
                                         range_filter: str = "now-2w",
                                         entity: List | None = None,
-                                        index: str = ELASTIC_METADATA_INDEX,
+                                        index: str = conf.elastic_metadata_index,
                                         ):
 
         logger.info(f"Retrieving latest available input data files of keyword: {type_keyword}")

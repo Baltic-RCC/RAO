@@ -4,20 +4,14 @@ import uuid
 from datetime import datetime
 import pandas as pd
 from io import BytesIO
-import config
-from pathlib import Path
 from loguru import logger
 from integrations.s3_storage import S3Minio
 from integrations.elastic import Elastic
 from common.rdf_converter import convert_cim_rdf_to_json, normalize_cim_payload
-from common.config_parser import parse_app_properties
+from common.object_storage import conf
+from input_retriever.settings import InputRetrieverHandlerSettings
 
-parse_app_properties(caller_globals=globals(),
-                     path=config.paths.object_storage.object_storage)
-parse_app_properties(caller_globals=globals(),
-                     path=str(Path(__file__).parent.joinpath("config.properties")),
-                     section="HANDLER",
-                     eval_types=True)
+handler_settings = InputRetrieverHandlerSettings()
 
 
 class HandlerMetadataToObjectStorage:
@@ -56,18 +50,18 @@ class HandlerMetadataToObjectStorage:
             _publisher = _publisher.split("/")[-1]
         _start_date = metadata_object.get("startDate", "UNDEFINED")
         _end_date = metadata_object.get("endDate", "UNDEFINED")
-        content.name = f"{S3_BUCKET_OUT_PREFIX}/{_keyword}_{_version}_{_publisher}_{_start_date}_{_end_date}.xml"
+        content.name = f"{conf.s3_bucket_out_prefix}/{_keyword}_{_version}_{_publisher}_{_start_date}_{_end_date}.xml"
         self.s3_service.upload_object(
             file_path_or_file_object=content,
-            bucket_name=S3_BUCKET_OUT,
+            bucket_name=conf.s3_bucket_out,
             metadata=properties.headers,
         )
 
         # Send metadata object to Elastic
-        metadata_object["content_bucket"] = S3_BUCKET_OUT
+        metadata_object["content_bucket"] = conf.s3_bucket_out
         metadata_object["content_reference"] = content.name
         self.elastic_service.send_to_elastic(
-            index=ELASTIC_METADATA_INDEX,
+            index=conf.elastic_metadata_index,
             json_message=metadata_object,
             id=metadata_object.get('identifier', None)
         )
@@ -80,9 +74,9 @@ class HandlerMetadataToObjectStorage:
 class HandlerInputDataToElastic:
 
     KEYWORD_MAP = {
-        "CO": {"root_class": ["OrdinaryContingency", "ExceptionalContingency", "OutOfRangeContingency"], "index": ELASTIC_CONTINGENCIES_INDEX},
-        "AE": {"root_class": ["AssessedElement"], "index": ELASTIC_ASSESSED_ELEMENTS_INDEX},
-        "RA": {"root_class": ["GridStateAlterationRemedialAction"], "index": ELASTIC_REMEDIAL_ACTIONS_INDEX},
+        "CO": {"root_class": ["OrdinaryContingency", "ExceptionalContingency", "OutOfRangeContingency"], "index": handler_settings.elastic_contingencies_index},
+        "AE": {"root_class": ["AssessedElement"], "index": handler_settings.elastic_assessed_elements_index},
+        "RA": {"root_class": ["GridStateAlterationRemedialAction"], "index": handler_settings.elastic_remedial_actions_index},
     }
 
     def __init__(self):
@@ -99,7 +93,7 @@ class HandlerInputDataToElastic:
         # Convert message from NC to JSON
         data = convert_cim_rdf_to_json(rdfxml=message,
                                        root_class=self.KEYWORD_MAP[keyword]["root_class"],
-                                       key_mode=CONVERTER_KEY_MODE)
+                                       key_mode=handler_settings.converter_key_mode)
 
         # JSON normalize and transform to DataFrame
         df = normalize_cim_payload(payload=data, root_only=True)

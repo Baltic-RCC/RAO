@@ -1,25 +1,24 @@
 import functools
 import time
 import pika
-import config
 import traceback
 import signal
 from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor
 from loguru import logger
-from common.config_parser import parse_app_properties
+from config.settings import RmqSettings
 
 
-parse_app_properties(globals(), config.paths.integrations.rmq)
+conf = RmqSettings()
 
 
 class BlockingClient:
 
     def __init__(self,
-                 host: str = RMQ_SERVER,
-                 port: int = int(RMQ_PORT),
-                 username: str = RMQ_USERNAME,
-                 password: str = RMQ_PASSWORD,
+                 host: str = conf.rmq_server,
+                 port: int = conf.rmq_port,
+                 username: str = conf.rmq_username,
+                 password: str = conf.rmq_password.get_secret_value(),
                  message_converter: object | None = None,
                  message_handler: object | None = None,
                  ):
@@ -157,16 +156,16 @@ class BlockingClient:
 
 class SingleMessageConsumer:
     def __init__(self,
-                 host: str = RMQ_SERVER,
-                 port: int = RMQ_PORT,
-                 vhost: str = RMQ_VHOST,
+                 host: str = conf.rmq_server,
+                 port: int = conf.rmq_port,
+                 vhost: str = conf.rmq_vhost,
                  queue: str | None = None,
-                 username: str = RMQ_USERNAME,
-                 password: str = RMQ_PASSWORD,
+                 username: str = conf.rmq_username,
+                 password: str = conf.rmq_password.get_secret_value(),
                  reply_to: Optional[str] = None,
                  message_handlers: Optional[List[object]] = None,
                  message_converter: Optional[object] = None,
-                 heartbeat: int = int(RMQ_HEARTBEAT),
+                 heartbeat: int = conf.rmq_heartbeat,
                  socket_timeout: Optional[float] = None,
                  blocked_connection_timeout: float = 600.0,
                  connection_attempts: int = 5,
@@ -349,14 +348,14 @@ class RMQConsumer:
     """
 
     def __init__(self,
-                 host: str = RMQ_SERVER,
-                 port: int = int(RMQ_PORT),
-                 vhost: str = RMQ_VHOST,
+                 host: str = conf.rmq_server,
+                 port: int = conf.rmq_port,
+                 vhost: str = conf.rmq_vhost,
                  queue: str | None = None,
-                 heartbeat: str | int = int(RMQ_HEARTBEAT),
+                 heartbeat: str | int = conf.rmq_heartbeat,
                  reply_to: str | None = None,
-                 username: str = RMQ_USERNAME,
-                 password: str = RMQ_PASSWORD,
+                 username: str = conf.rmq_username,
+                 password: str = conf.rmq_password.get_secret_value(),
                  message_handlers: List[object] | None = None,
                  message_converter: object | None = None):
 
@@ -696,14 +695,14 @@ class ReconnectingConsumer:
     """
 
     def __init__(self,
-                 host: str = RMQ_SERVER,
-                 port: int = int(RMQ_PORT),
-                 vhost: str = RMQ_VHOST,
+                 host: str = conf.rmq_server,
+                 port: int = conf.rmq_port,
+                 vhost: str = conf.rmq_vhost,
                  queue: str | None = None,
-                 heartbeat: str | int = int(RMQ_HEARTBEAT),
+                 heartbeat: str | int = conf.rmq_heartbeat,
                  reply_to: str | None = None,
-                 username: str = RMQ_USERNAME,
-                 password: str = RMQ_PASSWORD,
+                 username: str = conf.rmq_username,
+                 password: str = conf.rmq_password.get_secret_value(),
                  message_handler: object | None = None,
                  message_converter: object | None = None):
         self._reconnect_delay = 0

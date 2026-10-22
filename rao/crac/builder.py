@@ -15,7 +15,7 @@ class CracBuilder:
     This class is a placeholder and can be extended with specific pre-processing methods.
     """
 
-    # TODO move to config.properties once the monitoring scope is agreed
+    # TODO move to rao/settings.py once the monitoring scope is agreed
     # Voltage monitoring scope: all transmission VoltageLevels in the merged model,
     # including PSE VoltageLevels in the Baltic CCR.
     MIN_MONITORED_NOMINAL_VOLTAGE_KV = 330.0
