@@ -1,6 +1,8 @@
 import os
 import uuid
 from datetime import datetime, timezone
+
+import pika
 from pika import BasicProperties
 from io import BytesIO
 import pandas as pd
@@ -18,8 +20,10 @@ from rao.crac.builder import CracBuilder
 from rao.crac.context import CracWorkaroundContext
 from rao.parameters.manager import RaoSettingsManager
 from rao.parameters.manager import LoadflowSettingsManager
+from rao.parameters.profiles import RAO_PROFILES
 from rao.optimizer import Optimizer
-from rao.find_low_impedance_gap import find_threshold_gap_branches
+from rao.voltage_monitoring import build_applied_actions
+from rao.find_low_impedance_gap import find_threshold_gap_branches, zero_out
 from rao.voltage_monitoring import build_voltage_documents
 from loguru import logger
 
@@ -41,6 +45,7 @@ class HandlerVirtualOperator:
         self.current_violations_only = current_violations_only
         self.debug = debug
         self.network = None
+        self.crac = None
 
         # Services initialization
         try:
@@ -51,7 +56,6 @@ class HandlerVirtualOperator:
         # Metadata
         self.scenario_timestamp = None
         self.network_model_meta = None
-        self.crac = None
 
     def get_input_profiles(self):
         requested_profile_types = ["CO", "AE", "RA"]
@@ -242,154 +246,49 @@ class HandlerVirtualOperator:
         batch_id = str(uuid.uuid4())
         file_prefix = f"{properties.headers['time-horizon']}_{self.scenario_timestamp:%Y%m%dT%H%M}"
         network_prepared = self.network.save_to_binary_buffer(format="XIIDM")
-        network_prepared.name = f"{S3_PREFIX_PREPARED}/NETWORK_{file_prefix}_{batch_id}.zip"
+        network_prepared.name = f"{S3_PREPARED_MODELS_PREFIX}/NETWORK_{file_prefix}_{batch_id}.zip"
         self.object_storage.s3_service.upload_object(file_path_or_file_object=network_prepared,
-                                                     bucket_name=S3_BUCKET_RESULTS,
+                                                     bucket_name=S3_BUCKET_IN_MODELS,
                                                      metadata=properties.headers)
 
         # Build CRAC per contingency and publish one optimization task for each
         contingencies = violations.groupby("ContingencyPowerFlowResult.Contingency")
-        publisher = rmq.BlockingClient()
-        try:
-            for mrid, data in contingencies:
-                logger.info(f"Processing contingency: {mrid} with {len(data)} violations")
-                logger.info(f"Violations on network elements: {data['PowerFlowResult.EquipmentName'].to_list()}")
+        rmq_channel = kwargs.get('channel')
+        for mrid, data in contingencies:
+            logger.info(f"Processing contingency: {mrid} with {len(data)} violations")
+            logger.info(f"Violations on network elements: {data['PowerFlowResult.EquipmentName'].to_list()}")
 
-                crac = crac_service.build_crac(contingency_ids=[mrid])
-                crac_object = BytesIO(json.dumps(crac, ensure_ascii=False, indent=2).encode('utf-8'))
-                crac_object.name = f"RAO/CRAC_{file_prefix}_CO_{mrid}.json"
-                self.object_storage.s3_service.upload_object(file_path_or_file_object=crac_object,
-                                                             bucket_name=S3_BUCKET_RESULTS,
-                                                             metadata=properties.headers)
+            crac = crac_service.build_crac(contingency_ids=[mrid])
+            crac_object = BytesIO(json.dumps(crac, ensure_ascii=False, indent=2).encode('utf-8'))
+            crac_object.name = f"RAO/CRAC_{file_prefix}_CO_{mrid}.json"
+            self.object_storage.s3_service.upload_object(file_path_or_file_object=crac_object,
+                                                         bucket_name=S3_BUCKET_RESULTS,
+                                                         metadata=properties.headers)
 
-                task = {
-                    'contingency_id': mrid,
-                    'bucket': S3_BUCKET_RESULTS,
-                    'network_reference': network_prepared.name,
-                    'crac_reference': crac_object.name,
-                    'loadflow_settings': _loadflow_settings_key,
-                    'violation_terminals': data['PowerFlowResult.ACDCTerminal'].astype(str).tolist(),
-                }
-                headers = {
-                    **properties.headers,
-                    'contingency-id': mrid,
-                    'batch-id': batch_id,
-                    'batch-size': contingencies.ngroups,
-                }
-                publisher.publish(payload=json.dumps(task),
-                                  exchange_name=RMQ_EXCHANGE_OPTIMIZATION,
-                                  headers=headers,
-                                  delivery_mode=2)
-                logger.info(f"Optimization task published for contingency: {mrid}")
-        finally:
-            publisher.close()
+            task = {
+                'contingency_id': mrid,
+                'network_bucket': S3_BUCKET_IN_MODELS,
+                'network_reference': network_prepared.name,
+                'crac_bucket': S3_BUCKET_RESULTS,
+                'crac_reference': crac_object.name,
+                'loadflow_settings': _loadflow_settings_key,
+                'violation_terminals': data['PowerFlowResult.ACDCTerminal'].astype(str).tolist(),
+            }
+            headers = {
+                **properties.headers,
+                'contingency-id': mrid,
+                'batch-id': batch_id,
+                'batch-size': contingencies.ngroups,
+            }
+            rmq_channel.basic_publish(body=json.dumps(task),
+                                      exchange="",
+                                      routing_key="rao.violations.optimization",
+                                      properties=pika.BasicProperties(headers=headers, delivery_mode=2))
+            logger.info(f"Optimization task published for contingency: {mrid}")
 
         logger.success(f"Message handling completed, published {contingencies.ngroups} optimization tasks")
 
         return message, properties
-
-
-
-    # Group by contingency id
-    # TODO assess performance and consider to avoid groupby and only iterator over unique contingencies
-    for mrid, data in violations.groupby("ContingencyPowerFlowResult.Contingency"):
-
-        # Start the optimization
-        optimizer = Optimizer(network=self.network,
-                              crac_source=crac_object,
-                              parameters_source=optimizer_settings.to_bytesio(),
-                              loadflow_parameters=lf_settings_manager.build_pypowsybl_parameters(),
-                              debug=self.debug)
-        optimizer.run()
-        logger.info(f"Optimization finished for contingency: {mrid}")
-
-        # Check optimizer results
-        if optimizer.results is None:
-            logger.warning("Optimizer has no results to be processed")
-            continue
-
-        # Serialize results to json
-        results = optimizer.results.to_json()
-        if results['computationStatus'] == 'failure':
-            logger.error(f"Optimizer failed computation: {results}")
-            logger.error(f"Enable pypowsybl logs for more information")
-            logger.warning("Attempting to relax RAO parameters and re-optimize")
-
-            rao_params_relaxed = json.load(optimizer_settings.to_bytesio())
-            rao_params_relaxed["extensions"]["open-rao-search-tree-parameters"]["load-flow-and-sensitivity-computation"]["sensitivity-parameters"]["load-flow-parameters"]["useReactiveLimits"] = False
-
-            if hasattr(crac_object, "seek"):
-                crac_object.seek(0)
-            optimizer = Optimizer(network=self.network,
-                                  crac_source=crac_object,
-                                  parameters_source=BytesIO(json.dumps(rao_params_relaxed).encode('utf-8')),
-                                  debug=self.debug)
-            optimizer.run()
-            results = optimizer.results.to_json() if optimizer.results else None
-
-
-        # Check if there are any optimized remedial actions
-        if not results['networkActionResults'] and not results['rangeActionResults']:
-            logger.warning(f"No possible actions proposed by optimizer")
-        else:
-            for optimized_action in results['networkActionResults']:
-                logger.info(f"Optimized network action: {optimized_action}")
-                _details = [x for x in self.crac['networkActions'] if x['id'] == optimized_action['networkActionId']]
-                logger.info(f"Action details: {_details[0]}")
-            for optimized_action in results['rangeActionResults']:
-                # TODO print out action details
-                logger.info(f"Optimized range action: {optimized_action}")
-
-        applied_actions = build_applied_actions(rao_results=results, crac=self.crac)
-        logger.info(f"Post-processing results")
-        results = self.post_process_results(results=pd.json_normalize(results))
-
-        # Strip -Leg1/Leg2 from the 2w trafo CNECs that were replaced with the 3w-2w workaround
-        violation_ids = set("_" + data['PowerFlowResult.ACDCTerminal'].astype(str))
-        base_element_ids = (results["cnec.networkElementId"].astype(str).str.replace(r'-Leg\d+$', '', regex=True))
-
-        # Flag CNECs which were identified as violations from received SAR profile
-        results['cnec.sourceViolation'] = base_element_ids.isin(violation_ids)
-
-        # Logging status of successful optimization process for contingency
-        logger.success(f"Optimization successful for contingency: {mrid}")
-
-        # Include message properties as meta
-        results['rmq'] = [properties.headers] * len(results)
-
-        # Include optimization main relevant settings
-        results['settings'] = [{"objective-function": optimizer_settings.get("objective-function.type")}] * len(results)
-
-        # Send results to Elastic
-        data_to_send = results.astype(object).where(pd.notna(results), None).to_dict("records")
-        logger.info(f"Sending optimization results to Elastic index: {ELASTIC_RESULTS_INDEX}")
-        self.object_storage.elastic_service.send_to_elastic_bulk(
-            index=ELASTIC_RESULTS_INDEX,
-            json_message_list=data_to_send,
-        )
-        # Voltage monitoring results to Elastic
-        if optimizer.voltage_monitoring_results is not None:
-            voltage_results = optimizer.voltage_monitoring_results.get_voltage_cnec_results()
-            if not voltage_results.empty:
-                voltage_docs = build_voltage_documents(voltage_results=voltage_results,
-                                                       crac=self.crac,
-                                                       network=self.network,
-                                                       headers=properties.headers,
-                                                       applied_actions=applied_actions)
-
-                logger.info(f"Sending {len(voltage_docs)} voltage monitoring results to Elastic")
-                # Derive the document id so re-running a scenario overwrites its
-                # results instead of adding a second copy of every document.
-                self.object_storage.elastic_service.send_to_elastic_bulk(
-                    index=ELASTIC_VOLTAGE_RESULTS_INDEX,
-                    json_message_list=voltage_docs,
-                    id_from_metadata=True,
-                    id_metadata_list=['@time_horizon', '@scenario_timestamp', 'cnec_id', 'limit_type'],
-                    hashing=True,
-                )
-    logger.success(f"Message handling completed successfully")
-
-    return message, properties
 
 
 class HandlerOptimizer:
@@ -399,6 +298,9 @@ class HandlerOptimizer:
         self.debug = debug
         self.object_storage = ObjectStorage()
 
+        self.network = None
+        self.crac = None
+
     def _download(self, bucket: str, reference: str) -> BytesIO:
         content = self.object_storage.s3_service.download_object(bucket_name=bucket, object_name=reference)
         if content is None:
@@ -407,7 +309,7 @@ class HandlerOptimizer:
         buffer.name = reference
         return buffer
 
-    def optimize(self, network, crac_object: BytesIO, loadflow_parameters):
+    def optimize(self, crac_object: BytesIO, loadflow_parameters):
         """Run RAO with each profile in order and return the first successful attempt.
 
         If all profiles fail, the last attempt is returned so its failure status still reaches Elastic.
@@ -415,10 +317,11 @@ class HandlerOptimizer:
         optimizer, profile = None, None
         for profile in RAO_PROFILES:
             settings = RaoSettingsManager()
+            settings.profile = profile
             settings.set(profile["overrides"])
             logger.info(f"Running optimization with RAO profile: {profile['name']}")
 
-            optimizer = Optimizer(network=network,
+            optimizer = Optimizer(network=self.network,
                                   crac_source=crac_object,
                                   parameters_source=settings.to_bytesio(),
                                   loadflow_parameters=loadflow_parameters,
@@ -516,19 +419,13 @@ class HandlerOptimizer:
         self.object_storage.elastic_service.send_to_elastic_bulk(index=ELASTIC_RESULTS_INDEX,
                                                                  json_message_list=data_to_send)
 
-    def publish_voltage_results_to_elastic(self, voltage_results: pd.DataFrame, applied_actions: list[dict]):
-        voltage_docs = build_voltage_documents(voltage_results=voltage_results,
-                                               crac=self.crac,
-                                               network=self.network,
-                                               headers=properties.headers,
-                                               applied_actions=applied_actions)
-
-        logger.info(f"Sending {len(voltage_docs)} voltage monitoring results to Elastic")
+    def publish_voltage_results_to_elastic(self, results: list):
+        logger.info(f"Sending {len(results)} voltage monitoring results to Elastic")
         # Derive the document id so re-running a scenario overwrites its
         # results instead of adding a second copy of every document.
         self.object_storage.elastic_service.send_to_elastic_bulk(
             index=ELASTIC_VOLTAGE_RESULTS_INDEX,
-            json_message_list=voltage_docs,
+            json_message_list=results,
             id_from_metadata=True,
             id_metadata_list=['@time_horizon', '@scenario_timestamp', 'cnec_id', 'limit_type'],
             hashing=True,
@@ -551,10 +448,10 @@ class HandlerOptimizer:
         logger.info(f"Optimizing contingency: {contingency_id} (batch {headers.get('batch-id')})")
 
         # Load prepared network and CRAC built by the virtual operator
-        network = pypowsybl.network.load_from_binary_buffer(
-            buffer=self._download(task['bucket'], task['network_reference']))
-        crac_object = self._download(task['bucket'], task['crac_reference'])
-        crac = json.loads(crac_object.getvalue())
+        self.network = pypowsybl.network.load_from_binary_buffer(
+            buffer=self._download(task['network_bucket'], task['network_reference']))
+        crac_object = self._download(task['crac_bucket'], task['crac_reference'])
+        self.crac = json.loads(crac_object.getvalue())
 
         lf_settings_manager = LoadflowSettingsManager(
             elastic_server=self.object_storage.elastic_service.server,
@@ -563,7 +460,6 @@ class HandlerOptimizer:
         )
 
         optimizer, profile, settings = self.optimize(
-            network=network,
             crac_object=crac_object,
             loadflow_parameters=lf_settings_manager.build_pypowsybl_parameters())
 
@@ -579,12 +475,9 @@ class HandlerOptimizer:
         for optimized_action in rao_results['rangeActionResults']:
             logger.info(f"Optimized range action: {optimized_action}")
 
-        from rao.voltage_monitoring import build_applied_actions
-        applied_actions = build_applied_actions(rao_results=rao_results, crac=crac)
-
         # Post-process the RAO result of one contingency and send it to Elastic
         logger.info(f"Post-processing results")
-        results = self.post_process_results(results=pd.json_normalize(rao_results), crac=crac)
+        results = self.post_process_results(results=pd.json_normalize(rao_results))
 
         # Strip -Leg1/Leg2 from the 2w trafo CNECs that were replaced with the 3w-2w workaround
         violation_ids = {f"_{terminal}" for terminal in violation_terminals}
@@ -595,7 +488,7 @@ class HandlerOptimizer:
 
         # Include message properties and optimization main relevant settings as meta
         results['rmq'] = [headers] * len(results)
-        results['settings'] = [settings] * len(results)
+        results['settings'] = [settings.profile] * len(results)
 
         # Send results to Elastic
         self.publish_flow_results_to_elastic(results=results)
@@ -604,7 +497,13 @@ class HandlerOptimizer:
         if optimizer.voltage_monitoring_results is not None:
             voltage_results = optimizer.voltage_monitoring_results.get_voltage_cnec_results()
             if not voltage_results.empty:
-                self.publish_voltage_results_to_elastic(voltage_results=voltage_results, applied_actions=applied_actions)
+                applied_actions = build_applied_actions(rao_results=rao_results, crac=self.crac)
+                voltage_docs = build_voltage_documents(voltage_results=voltage_results,
+                                                       crac=self.crac,
+                                                       network=self.network,
+                                                       headers=headers,
+                                                       applied_actions=applied_actions)
+                self.publish_voltage_results_to_elastic(results=voltage_docs)
 
         logger.success(f"Optimization handling completed for contingency: {contingency_id}")
 

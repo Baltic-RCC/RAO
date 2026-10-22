@@ -18,5 +18,5 @@ USER appuser
 # Start process
 ENV PYTHONPATH="${PYTHONPATH}:/app"
 ENTRYPOINT ["python"]
-CMD ["rao/worker.py"]
+CMD ["rao/worker_operator.py"]
 #ENTRYPOINT ["/bin/bash"]

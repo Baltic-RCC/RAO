@@ -9,7 +9,7 @@ import sys
 
 parse_app_properties(caller_globals=globals(),
                      path=str(Path(__file__).parent.joinpath("config.properties")),
-                     section="OPTIMIZER_CONSUMER",
+                     section="CONSUMER_OPTIMIZER",
                      eval_types=True)
 
 # Set worker name and unique id to Elastic log handler
