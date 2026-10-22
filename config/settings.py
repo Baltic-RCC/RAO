@@ -1,18 +1,22 @@
+from pathlib import Path
 from typing import Any
 from loguru import logger
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Optional local file for debugging, see config/.example.env
+ENV_FILE = Path(__file__).parent / ".env"
 
 
 class AppSettings(BaseSettings):
     """Base for all application settings.
 
     Field names map to environment variables of the same name in upper case (e.g. ``rmq_server`` -> ``RMQ_SERVER``).
-    Values are taken from the environment, then from an optional ``.env`` file, then from the field default.
+    Values are taken from the environment, then from the optional ``config/.env`` file, then from the field default.
     Empty environment variables are ignored, so the default is used instead.
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, env_ignore_empty=True, extra="ignore")
 
     def model_post_init(self, context: Any) -> None:
         for name, value in self:
