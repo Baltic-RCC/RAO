@@ -84,8 +84,8 @@ class HandlerVirtualOperator:
     def get_network_model(self, content_reference: str):
         # Query merge reports
         metadata = {'content_reference': content_reference}
-        self.network_model_meta = self.object_storage.query(metadata_query=metadata, index=conf.elastic_models_index)[0]
-        content = self.object_storage.get_content(metadata=self.network_model_meta, bucket_name=conf.s3_bucket_in_models)
+        self.network_model_meta = self.object_storage.query(metadata_query=metadata)[0]
+        content = self.object_storage.get_content(metadata=self.network_model_meta)
 
         return content
 

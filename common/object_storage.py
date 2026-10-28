@@ -111,7 +111,7 @@ class ObjectStorage:
 
         return content_list
 
-    def get_content(self, metadata: dict, bucket_name: str | None = None):
+    def get_content(self, metadata: dict, bucket_name: str | None = conf.s3_bucket_in_models):
         """
         Retrieves content data from MinIO based on metadata information.
 
