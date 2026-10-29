@@ -49,9 +49,9 @@ class ObjectStorage:
 
     def query(self,
               metadata_query: Dict,
+              index: str,
               range_query: List[Dict] | None = None,
               query_filter: List[Dict] | None = None,
-              index: str = conf.elastic_metadata_index,
               return_payload: bool = False,
               size: str = '10000',
               sort: Dict | None = None,
@@ -111,7 +111,7 @@ class ObjectStorage:
 
         return content_list
 
-    def get_content(self, metadata: dict, bucket_name: str | None = conf.s3_bucket_in_models):
+    def get_content(self, metadata: dict, bucket_name: str | None = None):
         """
         Retrieves content data from MinIO based on metadata information.
 
@@ -136,6 +136,11 @@ class ObjectStorage:
 
         return content
 
+    def get_network_model(self, metadata: Dict):
+        meta = self.query(metadata_query=metadata, index=conf.elastic_models_index)[0]
+        content = self.get_content(metadata=meta, bucket_name=conf.s3_bucket_in_models)
+        return meta, content
+
     def get_input_data_for_timestamp(self,
                                      type_keyword: List,
                                      scenario_timestamp: str | datetime.datetime,
@@ -159,9 +164,9 @@ class ObjectStorage:
         ]
 
         files_metadata = self.query(metadata_query=metadata_query,
+                                    index=conf.elastic_metadata_index,
                                     range_query=range_query,
                                     return_payload=False,
-                                    index=index,
                                     )
 
         # Convert to dataframe
@@ -191,7 +196,6 @@ class ObjectStorage:
                                         scenario_timestamp: str | datetime.datetime,
                                         range_filter: str = "now-2w",
                                         entity: List | None = None,
-                                        index: str = conf.elastic_metadata_index,
                                         ):
 
         logger.info(f"Retrieving latest available input data files of keyword: {type_keyword}")
@@ -210,7 +214,7 @@ class ObjectStorage:
         files_metadata = self.query(metadata_query=metadata_query,
                                     query_filter=query_filter,
                                     return_payload=False,
-                                    index=index,
+                                    index=conf.elastic_metadata_index,
                                     )
 
         # Convert to dataframe

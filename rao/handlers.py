@@ -84,8 +84,7 @@ class HandlerVirtualOperator:
     def get_network_model(self, content_reference: str):
         # Query merge reports
         metadata = {'content_reference': content_reference}
-        self.network_model_meta = self.object_storage.query(metadata_query=metadata)[0]
-        content = self.object_storage.get_content(metadata=self.network_model_meta)
+        self.network_model_meta, content = self.object_storage.get_network_model(metadata=metadata)
 
         return content
 
@@ -236,7 +235,7 @@ class HandlerVirtualOperator:
         network_prepared = self.network.save_to_binary_buffer(format="XIIDM")
         network_prepared.name = f"{conf.s3_prepared_model_prefix}/NETWORK_{file_prefix}_{batch_id}.zip"
         self.object_storage.s3_service.upload_object(file_path_or_file_object=network_prepared,
-                                                     bucket_name=conf.s3_bucket_in_models,
+                                                     bucket_name=conf.s3_prepared_model_bucket,
                                                      metadata=properties.headers)
 
         # Build CRAC per contingency and publish one optimization task for each
@@ -248,16 +247,16 @@ class HandlerVirtualOperator:
 
             crac = crac_service.build_crac(contingency_ids=[mrid])
             crac_object = BytesIO(json.dumps(crac, ensure_ascii=False, indent=2).encode('utf-8'))
-            crac_object.name = f"RAO/CRAC_{file_prefix}_CO_{mrid}.json"
+            crac_object.name = f"{conf.s3_crac_prefix}/CRAC_{file_prefix}_CO_{mrid}.json"
             self.object_storage.s3_service.upload_object(file_path_or_file_object=crac_object,
-                                                         bucket_name=conf.s3_bucket_results,
+                                                         bucket_name=conf.s3_crac_bucket,
                                                          metadata=properties.headers)
 
             task = {
                 'contingency_id': mrid,
-                'network_bucket': conf.s3_bucket_in_models,
+                'network_bucket': conf.s3_prepared_model_bucket,
                 'network_reference': network_prepared.name,
-                'crac_bucket': conf.s3_bucket_results,
+                'crac_bucket': conf.s3_crac_bucket,
                 'crac_reference': crac_object.name,
                 'loadflow_settings': _loadflow_settings_key,
                 'violation_terminals': data['PowerFlowResult.ACDCTerminal'].astype(str).tolist(),
@@ -270,7 +269,7 @@ class HandlerVirtualOperator:
             }
             rmq_channel.basic_publish(body=json.dumps(task),
                                       exchange="",
-                                      routing_key="rao.violations.optimization",
+                                      routing_key=conf.rmq_queue_out,
                                       properties=pika.BasicProperties(headers=headers, delivery_mode=2))
             logger.info(f"Optimization task published for contingency: {mrid}")
 

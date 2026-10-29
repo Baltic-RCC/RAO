@@ -71,8 +71,6 @@ class RmqSettings(AppSettings):
 
 
 class ObjectStorageSettings(AppSettings):
-    s3_bucket_out: str = "pdn-data"
-    s3_bucket_out_prefix: str = "CSA"
     s3_bucket_in_models: str = "opde-confidential-models"
     elastic_metadata_index: str = "csa-input-metadata"
     elastic_models_index: str = "emfos-merge-reports"
