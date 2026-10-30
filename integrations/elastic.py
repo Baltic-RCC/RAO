@@ -7,19 +7,18 @@ import json
 import uuid
 from typing import List, Dict
 from elasticsearch import Elasticsearch
-import config
-from common.config_parser import parse_app_properties
+from config.settings import ElasticSettings
 from loguru import logger
 
-parse_app_properties(caller_globals=globals(), path=config.paths.integrations.elastic)
+conf = ElasticSettings()
 
 
 class Elastic:
 
     def __init__(self,
-                 server: str = ELK_SERVER,
-                 api_key: str = ELK_TOKEN,
-                 ssl_verify: bool = json.loads(ELK_SSL_VERIFY.lower()),
+                 server: str = conf.elk_server,
+                 api_key: str = conf.elk_token.get_secret_value(),
+                 ssl_verify: bool = conf.elk_ssl_verify,
                  debug: bool = False
                  ):
 
@@ -44,9 +43,9 @@ class Elastic:
     def send_to_elastic(index: str,
                         json_message: dict,
                         id: str = None,
-                        server: str = ELK_SERVER,
-                        api_key: str = ELK_TOKEN,
-                        ssl_verify: bool = json.loads(ELK_SSL_VERIFY.lower()),
+                        server: str = conf.elk_server,
+                        api_key: str = conf.elk_token.get_secret_value(),
+                        ssl_verify: bool = conf.elk_ssl_verify,
                         iso_timestamp: str = None,
                         index_rollover: bool = True,
                         debug: bool = False):
@@ -98,10 +97,10 @@ class Elastic:
                              id_from_metadata: bool = False,
                              id_metadata_list: List[str] | None = None,
                              hashing: bool = False,
-                             server: str = ELK_SERVER,
-                             api_key: str = ELK_TOKEN,
-                             ssl_verify: bool = json.loads(ELK_SSL_VERIFY.lower()),
-                             batch_size: int = int(BATCH_SIZE),
+                             server: str = conf.elk_server,
+                             api_key: str = conf.elk_token.get_secret_value(),
+                             ssl_verify: bool = conf.elk_ssl_verify,
+                             batch_size: int = conf.batch_size,
                              iso_timestamp: str | None = None,
                              index_rollover: bool = True,
                              debug: bool = False):
@@ -191,8 +190,8 @@ class HandlerSendToElastic:
 
     def __init__(self,
                  index: str,
-                 server: str = ELK_SERVER,
-                 api_key: str = ELK_TOKEN,
+                 server: str = conf.elk_server,
+                 api_key: str = conf.elk_token.get_secret_value(),
                  id_from_metadata: bool = False,
                  id_metadata_list: List[str] | None = None,
                  hashing: bool = False,

@@ -3,18 +3,15 @@ import inspect
 import os
 from loguru import logger
 import sys
-from pathlib import Path
 import datetime
 import traceback
 import time
 from elasticsearch import Elasticsearch
 import pypowsybl
-from common.config_parser import parse_app_properties
+from config.settings import LoggingSettings, ElasticSettings
 
 
-parse_app_properties(caller_globals=globals(),
-                     path=str(Path(__file__).parent.joinpath("logging/logging.properties")),
-                     eval_types=True)
+conf = LoggingSettings()
 
 
 class InterceptHandler(logging.Handler):
@@ -40,14 +37,15 @@ class InterceptHandler(logging.Handler):
 
 class ElasticLogHandler:
 
-    def __init__(self, server: str, api_key: str, index: str, logs_rollover: bool = False, extra: dict | None = None):
+    def __init__(self, server: str, api_key: str, index: str, ssl_verify: bool = False,
+                 logs_rollover: bool = False, extra: dict | None = None):
         self.server = server
         self.index = index
         self.logs_rollover = logs_rollover
         self.extra = extra if extra else {}
         self.client = Elasticsearch(self.server,
                                     api_key=api_key,
-                                    verify_certs=os.getenv("ELK_SSL_VERIFY", "false").lower() == "true",
+                                    verify_certs=ssl_verify,
                                     ca_certs=os.getenv("SSL_CERT_FILE", "/app/certs/ca-certificates.crt"),
                                     )
 
@@ -102,7 +100,7 @@ class ElasticLogHandler:
 def std_log_filter(record):
     """Method to suspend logs from standard python loggers"""
     if record["extra"].get("std_log"):
-        return FORWARD_STD_LOGS
+        return conf.forward_std_logs
     return True
 
 
@@ -118,35 +116,38 @@ def std_log_filter(record):
 # )
 
 # Configure STDERR (stream) sink according configuration
-logging.basicConfig(handlers=[InterceptHandler()], level=LOG_LEVEL, force=True)
+logging.basicConfig(handlers=[InterceptHandler()], level=conf.log_level, force=True)
 # logger.level("LVL1", no=1)
 logger.remove()  # remove all existing handlers to have fresh setup
-logger.add(sink=sys.stderr, level=LOG_LEVEL, filter=std_log_filter)
-logger.debug(f"Stream logger initialized with level: {LOG_LEVEL}")
+logger.add(sink=sys.stderr, level=conf.log_level, filter=std_log_filter)
+logger.debug(f"Stream logger initialized with level: {conf.log_level}")
 
 # Configure Elastic sink according configuration
-parse_app_properties(caller_globals=globals(), path=str(Path(__file__).parent.joinpath("integrations/elastic.properties")))
-if ELASTIC_LOGS_HANDLER:
+if conf.elastic_logs_handler:
     # Disable loggers which generates messages during sink method to elasticsearch
     for logger_name in ["elastic_transport", "urllib3"]:
         es_logger = logging.getLogger(logger_name)
         es_logger.propagate = False
         es_logger.setLevel("WARNING")
-    elastic_handler = ElasticLogHandler(server=ELK_SERVER, api_key=ELK_TOKEN, index=ELASTIC_LOGS_INDEX)
+    elastic_settings = ElasticSettings()
+    elastic_handler = ElasticLogHandler(server=elastic_settings.elk_server,
+                                        api_key=elastic_settings.elk_token.get_secret_value(),
+                                        index=conf.elastic_logs_index,
+                                        ssl_verify=elastic_settings.elk_ssl_verify)
     logger.add(sink=elastic_handler.write,
-               level=LOG_LEVEL,
+               level=conf.log_level,
                serialize=True,
-               enqueue=ENQUEUE,
-               catch=CATCH,
+               enqueue=conf.enqueue,
+               catch=conf.catch,
                filter=std_log_filter)
 
 # Expose powsybl logs if defined by configuration
-if ENABLE_POWSYBL_LOGS:
-    logging.getLogger("powsybl").setLevel(LOG_LEVEL)
-    logger.info(f"Powsybl logs enabled with level: {LOG_LEVEL}")
+if conf.enable_powsybl_logs:
+    logging.getLogger("powsybl").setLevel(conf.log_level)
+    logger.info(f"Powsybl logs enabled with level: {conf.log_level}")
 
 # Exclude logs from ingration modules
-modules_to_exclude = EXCLUDE_LOGGERS.split(",") if EXCLUDE_LOGGERS else []
+modules_to_exclude = [m.strip() for m in conf.exclude_loggers.split(",") if m.strip()]
 if modules_to_exclude:
     for m in modules_to_exclude:
         logging.getLogger(m).propagate = False

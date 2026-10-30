@@ -9,3 +9,5 @@ README.md
 DEPENDENCY_LICENSES.md
 .gitlab-ci.yml
 .gitignore
+# Local secrets for debugging
+config/.env

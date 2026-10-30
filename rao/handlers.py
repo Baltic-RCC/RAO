@@ -1,7 +1,6 @@
-import os
 import uuid
 from datetime import datetime, timezone
-from pika import BasicProperties
+import pika
 from io import BytesIO
 import pandas as pd
 import numpy as np
@@ -9,247 +8,32 @@ import json
 import pypowsybl
 import itertools
 import config
-from pathlib import Path
 from typing import Any
-from common.object_storage import ObjectStorage
-from common.config_parser import parse_app_properties
+from common.object_storage import ObjectStorage, conf
 from common.decorators import performance_counter
 from rao.crac.builder import CracBuilder
 from rao.crac.context import CracWorkaroundContext
 from rao.parameters.manager import RaoSettingsManager
 from rao.parameters.manager import LoadflowSettingsManager
+from rao.parameters.profiles import RAO_PROFILES
 from rao.optimizer import Optimizer
+from rao.settings import RaoHandlerSettings
+from rao.voltage_monitoring import build_applied_actions
+from rao.find_low_impedance_gap import find_threshold_gap_branches, zero_out
+from rao.voltage_monitoring import build_voltage_documents
 from loguru import logger
 
-parse_app_properties(caller_globals=globals(), path=config.paths.object_storage.object_storage)
-parse_app_properties(caller_globals=globals(),
-                     path=str(Path(__file__).parent.joinpath("config.properties")),
-                     section="HANDLER",
-                     eval_types=True)
-
-
-def _elementary_actions(crac_action: dict):
-    """Yield the elementary actions of a CRAC network action as flat dictionaries.
-
-    Each elementary action collection carries a different value field, so the
-    kind is emitted explicitly instead of being inferred from which key is set.
-    """
-    for elementary in (crac_action.get('terminalsConnectionActions') or []):
-        yield {
-            'elementaryType': 'terminalsConnection',
-            'networkElementId': elementary.get('networkElementId'),
-            'actionType': elementary.get('actionType'),
-            'sectionCount': None,
-        }
-    for elementary in (crac_action.get('shuntCompensatorPositionActions') or []):
-        yield {
-            'elementaryType': 'shuntCompensatorPosition',
-            'networkElementId': elementary.get('networkElementId'),
-            'actionType': None,
-            'sectionCount': elementary.get('sectionCount'),
-        }
-
-
-def _collapse(values: list) -> Any:
-    """Return a lone distinct value as a scalar, otherwise the sorted distinct list.
-
-    Remedial actions almost always apply one kind of elementary action, so a
-    scalar keeps the Elastic document readable; mixed actions stay complete.
-    """
-    distinct = {value for value in values if value is not None}
-    if not distinct:
-        return None
-    if len(distinct) == 1:
-        return distinct.pop()
-    return sorted(distinct, key=str)
-
-
-def build_applied_actions(rao_results: dict, crac: dict) -> list[dict]:
-    """Expand optimized network actions into structured Elastic documents.
-
-    Emits one entry per (remedial action, activated state), with the affected
-    network elements as a list, so each attribute lands in its own Elastic
-    field instead of a single opaque string. Elasticsearch flattens arrays of
-    objects and drops the pairing between sibling fields, so the correlated
-    tuple is also pre-joined into 'label' for terms aggregations.
-    """
-    crac_actions = {a['id']: a for a in crac.get('networkActions', [])}
-    applied_actions = []
-
-    for action_result in rao_results.get('networkActionResults', []):
-        action_id = action_result.get('networkActionId')
-        crac_action = crac_actions.get(action_id, {})
-        # Stays empty when the CRAC carries no details for the action
-        elementary_actions = list(_elementary_actions(crac_action))
-
-        action_type = _collapse([e['actionType'] for e in elementary_actions])
-        section_count = _collapse([e['sectionCount'] for e in elementary_actions])
-
-        for state in (action_result.get('activatedStates') or [{}]):
-            entry = {
-                'id': action_id,
-                'name': crac_action.get('name'),
-                'operator': crac_action.get('operator'),
-                'instant': state.get('instant'),
-                'contingencyId': state.get('contingency'),
-                'elementaryType': _collapse([e['elementaryType'] for e in elementary_actions]),
-                'actionType': action_type,
-                'sectionCount': section_count,
-                'networkElementIds': [e['networkElementId'] for e in elementary_actions
-                                      if e['networkElementId'] is not None],
-            }
-            value = action_type if action_type is not None else section_count
-            entry['label'] = " | ".join(
-                str(part) for part in (entry['name'] or action_id, entry['instant'], value)
-                if part is not None
-            )
-            applied_actions.append(entry)
-
-    return applied_actions
-
-
-# Voltage limits are reported as separate documents, matching csa-bus-results
-# where v_mag_percent is relative to the limit in scope rather than to nominal_v.
-VOLTAGE_LIMIT_TYPES = (
-    ('HIGH_VOLTAGE', 'max_voltage', 'high_voltage_limit'),
-    ('LOW_VOLTAGE', 'min_voltage', 'low_voltage_limit'),
-)
-
-
-def _finite(value: Any) -> Any:
-    """Return None for missing or non-finite numbers, which Elasticsearch rejects."""
-    if value is None:
-        return None
-    try:
-        if not np.isfinite(value):
-            return None
-        return float(value)
-    except TypeError:
-        return value
-
-
-def _voltage_level_meta(network) -> dict:
-    """Map voltage level id to its nominal voltage, substation name and country."""
-    meta = {}
-    try:
-        voltage_levels = network.get_voltage_levels()
-        substations = network.get_substations()
-    except Exception as error:
-        logger.warning(f"Could not read voltage level metadata from network: {error}")
-        return meta
-
-    for element_id, voltage_level in voltage_levels.iterrows():
-        substation_id = voltage_level.get('substation_id')
-        substation = substations.loc[substation_id] if substation_id in substations.index else {}
-        meta[str(element_id)] = {
-            'nominal_v': _finite(voltage_level.get('nominal_v')),
-            'substation_name': substation.get('name') or None,
-            'country': substation.get('country') or None,
-        }
-
-    return meta
-
-
-def _lookup_element(meta: dict, element_id: str | None) -> dict:
-    """Resolve a network element, tolerating the CRAC's leading underscore prefix."""
-    if not element_id:
-        return {}
-    return meta.get(element_id) or meta.get(element_id.lstrip('_')) or meta.get(f"_{element_id}") or {}
-
-
-def build_voltage_documents(voltage_results: pd.DataFrame,
-                            crac: dict,
-                            network,
-                            headers: dict,
-                            applied_actions: list[dict]) -> list[dict]:
-    """Build post-RAO voltage documents using the csa-bus-results field naming.
-
-    Emits one document per (voltage CNEC, limit type) so that v_mag_percent is
-    always relative to the limit in scope, the way csa-bus-results reports the
-    N-1 base case. Sharing the field names lets both be charted in one Kibana
-    view, separated by the 'state' field.
-    """
-    element_meta = _voltage_level_meta(network)
-    contingency_names = {c['id']: c.get('name') for c in crac.get('contingencies', [])}
-
-    cnec_meta = {}
-    for cnec in crac.get('voltageCnecs', []):
-        threshold = (cnec.get('thresholds') or [{}])[0]
-        cnec_meta[cnec['id']] = {
-            'subject_id': cnec.get('networkElementId'),
-            'subject_name': cnec.get('name'),
-            'operator': cnec.get('operator'),
-            'instant': cnec.get('instant'),
-            'contingency_id': cnec.get('contingencyId'),
-            'low_voltage_limit': _finite(threshold.get('min')),
-            'high_voltage_limit': _finite(threshold.get('max')),
-            'unit': threshold.get('unit'),
-        }
-
-    metadata = {
-        'run_id': headers.get('run-id'),
-        'source_module': headers.get('source-module'),
-        'trigger': headers.get('trigger'),
-        'project_name': headers.get('project-name'),
-        'content_reference': headers.get('content-reference'),
-        'username': headers.get('username'),
-    }
-
-    documents = []
-    for _, row in voltage_results.iterrows():
-        cnec = cnec_meta.get(row.get('cnec_id'), {})
-        element = _lookup_element(element_meta, cnec.get('subject_id'))
-        contingency_id = cnec.get('contingency_id')
-
-        for limit_type, voltage_column, limit_field in VOLTAGE_LIMIT_TYPES:
-            limit = cnec.get(limit_field)
-            v_mag = _finite(row.get(voltage_column))
-            # Skip the direction when the CRAC defines no threshold for it
-            if limit is None or v_mag is None:
-                continue
-
-            documents.append({
-                'state': 'POST_RAO',
-                'subject_id': cnec.get('subject_id'),
-                'subject_name': cnec.get('subject_name'),
-                'subject_type': 'VOLTAGE_LEVEL',
-                'substation_name': element.get('substation_name'),
-                'country': element.get('country'),
-                'nominal_v': element.get('nominal_v'),
-                'v_mag': v_mag,
-                'v_mag_percent': (v_mag / limit) * 100 if limit else None,
-                'limit_type': limit_type,
-                'high_voltage_limit': cnec.get('high_voltage_limit'),
-                'low_voltage_limit': cnec.get('low_voltage_limit'),
-                'is_violation': bool(v_mag > limit if limit_type == 'HIGH_VOLTAGE' else v_mag < limit),
-                # Monitoring reports one margin per CNEC - the tightest constraint in
-                # either direction - so derive the margin for the limit in scope.
-                'margin': (limit - v_mag) if limit_type == 'HIGH_VOLTAGE' else (v_mag - limit),
-                'margin_reported': _finite(row.get('margin')),
-                'unit': cnec.get('unit'),
-                'contingency_id': contingency_id,
-                'contingency_name': contingency_names.get(contingency_id),
-                'instant': cnec.get('instant'),
-                'operator': cnec.get('operator'),
-                'operator_strategy_id': '',
-                'cnec_id': row.get('cnec_id'),
-                'metadata': metadata,
-                '@time_horizon': headers.get('time-horizon'),
-                '@scenario_timestamp': headers.get('scenario-time'),
-                'raoAppliedActions': applied_actions,
-                'raoAppliedActionCount': len(applied_actions),
-            })
-
-    return documents
+conf = RaoHandlerSettings()
 
 
 class HandlerVirtualOperator:
 
-    def __init__(self, current_violations_only: bool = OPTIMIZE_ONLY_CURRENT_VIOLATIONS, debug: bool = DEBUG):
+    def __init__(self, current_violations_only: bool = conf.optimize_only_current_violations, debug: bool = conf.debug):
 
         self.current_violations_only = current_violations_only
         self.debug = debug
         self.network = None
+        self.crac = None
 
         # Services initialization
         try:
@@ -260,7 +44,6 @@ class HandlerVirtualOperator:
         # Metadata
         self.scenario_timestamp = None
         self.network_model_meta = None
-        self.crac = None
 
     def get_input_profiles(self):
         requested_profile_types = ["CO", "AE", "RA"]
@@ -301,10 +84,243 @@ class HandlerVirtualOperator:
     def get_network_model(self, content_reference: str):
         # Query merge reports
         metadata = {'content_reference': content_reference}
-        self.network_model_meta = self.object_storage.query(metadata_query=metadata, index=ELASTIC_MODELS_INDEX)[0]
-        content = self.object_storage.get_content(metadata=self.network_model_meta, bucket_name=S3_BUCKET_IN_MODELS)
+        self.network_model_meta, content = self.object_storage.get_network_model(metadata=metadata)
 
         return content
+
+    @performance_counter(units='seconds')
+    def handle(self, message: bytes, properties: object, **kwargs):
+        """
+        Process received SAR profile: prepare network model and CRACs, then fan out
+        one optimization task per contingency to the optimizer workers
+        """
+        # Get unique x-message-id from headers, if not there - create
+        message_id = properties.headers.get('message-id', str(uuid.uuid4()))
+        if getattr(config.initialize_logging, 'elastic_handler', None):
+            config.initialize_logging.elastic_handler.extra.update({
+                'message-id': message_id,
+                'source-module': properties.headers.get('source-module', 'unknown')
+            })
+        logger.info(f"Handling message with id: {message_id}")
+
+        # Get metadata from properties
+        self.scenario_timestamp = getattr(properties, 'headers').get('scenario-time', datetime.now(timezone.utc))
+        if isinstance(self.scenario_timestamp, str):
+            self.scenario_timestamp = datetime.fromisoformat(self.scenario_timestamp)
+
+        # Store SAR to BytesIO object and load to triplets to scan violations
+        sar = BytesIO(message)
+        sar.name = f"{getattr(properties, 'headers').get('project-name', 'undefined')}.xml"
+        logger.info(f"Loading received SAR profile")
+        sar_data = pd.read_RDF([sar])
+        for key, value in sar_data.types_dict().items():
+            logger.debug(f"Loaded objects: {value} {key}")
+
+        # Get all violations from SAR profile
+        violations = sar_data.key_tableview("PowerFlowResult.isViolation")
+        violations = violations[violations["PowerFlowResult.isViolation"] == "true"]
+
+        # Filter by violation deadband
+        violations = violations[violations["PowerFlowResult.value"] >= conf.violation_threshold_percent]
+
+        # Filter to current violations only if defined by configuration
+        if self.current_violations_only:
+            if 'PowerFlowResult.valueA' in violations.columns:
+                violations = violations[violations['PowerFlowResult.valueA'].notna()]
+            else:
+                violations = pd.DataFrame()
+
+        # Exit if there is no relevant violations
+        if violations.empty:
+            logger.info("No violations found in SAR profile, exiting VirtualOperator process")
+            return message, properties
+        else:
+            logger.info(f"SAR profile contains number of relevant violations: {len(violations)}")
+
+        # Exit if there are more unique contingencies to be optimized than configured limit
+        if 'ContingencyPowerFlowResult.Contingency' in violations.columns:
+            _contingencies_count = len(violations['ContingencyPowerFlowResult.Contingency'].unique())
+            logger.info(f"SAR profile contains number of unique contingencies: {_contingencies_count}")
+            if _contingencies_count > conf.contingencies_count_threshold:
+                logger.error("Number of unique contingencies is above threshold and message can not be processed")
+                return message, properties
+
+        # Get network model from object storage
+        content_reference = properties.headers.get('content-reference', None)
+        if not content_reference:
+            logger.error(f"RMQ message does not have content reference in headers")
+            return message, properties
+        network_object = self.get_network_model(content_reference=content_reference)
+
+        # Determine used loadflow settings during model merge
+        try:
+            _loadflow_settings_key = self.network_model_meta["loadflow_settings"]
+            logger.info(f"Loadflow settings defined by received merged model: {_loadflow_settings_key}")
+        except KeyError:
+            logger.warning(f"Loadflow settings not defined by received merged model, using default: BA_DEFAULT")
+            _loadflow_settings_key = "BA_DEFAULT"
+
+        lf_settings_manager = LoadflowSettingsManager(
+            elastic_server=self.object_storage.elastic_service.server,
+            elastic_api_key=self.object_storage.elastic_service.api_key,
+            settings_keyword=_loadflow_settings_key,
+        )
+
+        logger.info(f"Loading network model to pypowsybl")
+        self.network = pypowsybl.network.load_from_binary_buffer(
+            buffer=network_object,
+            parameters=lf_settings_manager.config['CGMES_IMPORT_PARAMETERS'])
+
+        # TODO Temporary: Replace 3w transformers with 3 x 2w transformers in the network
+        three_w_trafos = self.network.get_3_windings_transformers()
+        # Replace only 3w transformers that are XNEs
+        three_w_trafos_to_replace = three_w_trafos.index[ three_w_trafos[ "rated_u1" ] >= 330 ].tolist()
+        for tid in three_w_trafos_to_replace:
+            if tid not in self.network.get_3_windings_transformers().index:
+                logger.warning(f"Skipping {tid}: deleted from network [removed eq error not solved]")
+                continue
+            try:
+                pypowsybl.network.replace_3_windings_transformers_with_3_2_windings_transformers(self.network, [tid])
+            except Exception as e:
+                logger.error(f"Failed to replace {tid}: {e}")
+        logger.info("[TEMPORARY] Replaced 3w transformers with 3 x 2w transformers in the network")
+        two_w_trafos = self.network.get_2_windings_transformers()
+        replaced_ids = set(three_w_trafos_to_replace)
+        replaced_3w_trafos = two_w_trafos[ two_w_trafos.index.str.split("-Leg", n=1).str[ 0 ].isin(replaced_ids) ]
+
+        workaround_ctx = CracWorkaroundContext(
+            enable_3w_trafo_replacement=True,
+            replaced_3w_trafos=replaced_3w_trafos
+        )
+
+        # Solve initial loadflow on retrieved model
+        logger.info(f"Solve initial loadflow analysis")
+        lf_result = pypowsybl.loadflow.run_ac(
+            network=self.network,
+            parameters=lf_settings_manager.build_pypowsybl_parameters())
+        logger.info(f"Loadflow status: {lf_result[0]}")
+        if lf_result[0].status.value:
+            logger.error(f"Initial load flow computation failed, exiting message handling")
+            return message, properties
+
+        # Scan for low impedance gaps in the model (for lines, trafos) and zero them out.
+        # Network-wide, so done once here instead of per contingency
+        gap, neg_x, _ = find_threshold_gap_branches(self.network, lo=1e-8, hi=3e-5)
+        logger.info(f"LOW-Z {len(gap)} elements in [1e-8 - 3e-5] pu: {gap.groupby('kind').size().to_dict()}")
+        for eid, row in gap.iterrows():
+            logger.info(f"LOW-Z {row.kind} {eid}: r={row.r:.3e} x={row.x:.3e} |z|={row.z_pu:.3e}")
+        zero_out(self.network, gap)
+
+        # Get other input data from object storage
+        input_file_objects = self.get_input_profiles()
+
+        # Load input files and SAR to triplets
+        logger.info(f"Loading additional input data")
+        input_files_data = pd.read_RDF(input_file_objects)
+        for key, value in input_files_data.types_dict().items():
+            logger.debug(f"Loaded objects: {value} {key}")
+
+        # Get default optimization parameters
+        optimizer_settings = RaoSettingsManager()
+
+        # Create CRAC service
+        logger.info(f"Loading network to triplets for CRAC service")
+        network_triplets = pd.read_RDF(network_object)
+        crac_service = CracBuilder(data=input_files_data, network=network_triplets, workaround=workaround_ctx)
+        crac_service.get_limits()  # get limits from model and store in CRAC service object
+
+        # Store prepared network (with workarounds applied) so optimizer workers do not repeat them
+        batch_id = str(uuid.uuid4())
+        file_prefix = f"{properties.headers['time-horizon']}_{self.scenario_timestamp:%Y%m%dT%H%M}"
+        network_prepared = self.network.save_to_binary_buffer(format="XIIDM")
+        network_prepared.name = f"{conf.s3_prepared_model_prefix}/NETWORK_{file_prefix}_{batch_id}.zip"
+        self.object_storage.s3_service.upload_object(file_path_or_file_object=network_prepared,
+                                                     bucket_name=conf.s3_prepared_model_bucket,
+                                                     metadata=properties.headers)
+
+        # Build CRAC per contingency and publish one optimization task for each
+        contingencies = violations.groupby("ContingencyPowerFlowResult.Contingency")
+        rmq_channel = kwargs.get('channel')
+        for mrid, data in contingencies:
+            logger.info(f"Processing contingency: {mrid} with {len(data)} violations")
+            logger.info(f"Violations on network elements: {data['PowerFlowResult.EquipmentName'].to_list()}")
+
+            crac = crac_service.build_crac(contingency_ids=[mrid])
+            crac_object = BytesIO(json.dumps(crac, ensure_ascii=False, indent=2).encode('utf-8'))
+            crac_object.name = f"{conf.s3_crac_prefix}/CRAC_{file_prefix}_CO_{mrid}.json"
+            self.object_storage.s3_service.upload_object(file_path_or_file_object=crac_object,
+                                                         bucket_name=conf.s3_crac_bucket,
+                                                         metadata=properties.headers)
+
+            task = {
+                'contingency_id': mrid,
+                'network_bucket': conf.s3_prepared_model_bucket,
+                'network_reference': network_prepared.name,
+                'crac_bucket': conf.s3_crac_bucket,
+                'crac_reference': crac_object.name,
+                'loadflow_settings': _loadflow_settings_key,
+                'violation_terminals': data['PowerFlowResult.ACDCTerminal'].astype(str).tolist(),
+            }
+            headers = {
+                **properties.headers,
+                'contingency-id': mrid,
+                'batch-id': batch_id,
+                'batch-size': contingencies.ngroups,
+            }
+            rmq_channel.basic_publish(body=json.dumps(task),
+                                      exchange="",
+                                      routing_key=conf.rmq_queue_out,
+                                      properties=pika.BasicProperties(headers=headers, delivery_mode=2))
+            logger.info(f"Optimization task published for contingency: {mrid}")
+
+        logger.success(f"Message handling completed, published {contingencies.ngroups} optimization tasks")
+
+        return message, properties
+
+
+class HandlerOptimizer:
+    """Run the RAO for a single contingency task published by HandlerVirtualOperator."""
+
+    def __init__(self, debug: bool = conf.debug):
+        self.debug = debug
+        self.object_storage = ObjectStorage()
+
+        self.network = None
+        self.crac = None
+
+    def _download(self, bucket: str, reference: str) -> BytesIO:
+        content = self.object_storage.s3_service.download_object(bucket_name=bucket, object_name=reference)
+        if content is None:
+            raise FileNotFoundError(f"Object not found in bucket {bucket}: {reference}")
+        buffer = BytesIO(content)
+        buffer.name = reference
+        return buffer
+
+    def optimize(self, crac_object: BytesIO, loadflow_parameters):
+        """Run RAO with each profile in order and return the first successful attempt.
+
+        If all profiles fail, the last attempt is returned so its failure status still reaches Elastic.
+        """
+        optimizer, profile = None, None
+        for profile in RAO_PROFILES:
+            settings = RaoSettingsManager()
+            settings.profile = profile
+            settings.set(profile["overrides"])
+            logger.info(f"Running optimization with RAO profile: {profile['name']}")
+
+            optimizer = Optimizer(network=self.network,
+                                  crac_source=crac_object,
+                                  parameters_source=settings.to_bytesio(),
+                                  loadflow_parameters=loadflow_parameters,
+                                  debug=self.debug)
+            optimizer.run()
+
+            if optimizer.results is not None and optimizer.results.to_json()['computationStatus'] != 'failure':
+                logger.info(f"Optimization succeeded with RAO profile: {profile['name']}")
+                return optimizer, profile, settings
+            logger.warning(f"Optimization failed with RAO profile: {profile['name']}")
+
+        return optimizer, profile, settings
 
     @performance_counter(units='seconds')
     def post_process_results(self, results: pd.DataFrame):
@@ -384,314 +400,99 @@ class HandlerVirtualOperator:
 
         return results
 
-    def perform_low_impedance_workaround(self):
-        """ WORKAROUND FOR LOW IMPEDANCE LINES"""
-        # Threshold used to identify problematic lines with low impedance
-        low_impedance_threshold = float(3.0E-5)  # From LF provider parameters lowImpedanceThreshold: '3.0E-5'
-        # olf_default_low_impedance_threshold = float(1.0E-8) From default OLF parameters lowImpedanceThreshold: '1.0E-8'
+    def publish_flow_results_to_elastic(self, results: pd.DataFrame):
+        data_to_send = results.astype(object).where(pd.notna(results), None).to_dict("records")
+        logger.info(f"Sending optimization results to Elastic index: {conf.elastic_results_index}")
+        self.object_storage.elastic_service.send_to_elastic_bulk(index=conf.elastic_results_index,
+                                                                 json_message_list=data_to_send)
 
-        logger.info("[WORKAROUND] Performing lowImpedanceThreshold workaround for sensitivity analysis convergence")
-
-        # Because branch impedance is calculated on PU mode, and current network variant is in normal unit mode, we must set network to PU mode temporarily to retrieve relevant r,x values
-        self.network.per_unit = True
-        all_lines_pu = self.network.get_lines(all_attributes=False,
-                                              attributes=['r', 'x', 'connected1', 'connected2', 'fictitious'])
-        all_2w_trafos_pu = self.network.get_2_windings_transformers(all_attributes=False,
-                                                                    attributes=['r', 'x', 'connected1', 'connected2',
-                                                                                'fictitious'])  # TODO NB! only side2 r,x values are retrieved using this function. Assume that they are problematic.
-        # TODO 3w trafos would involve more work to calculate Z magnitude meeting low impedance threshold, as all legs need to be taken into account. For now not taken into account.
-        # all_3w_trafos_pu = self.network.get_3_windings_transformers(all_attributes=True)
-
-        # Filter relevant dfs for low impedance calculation threshold that are in service and not fictitious
-        relevant_lines = all_lines_pu[
-            (all_lines_pu['connected1']) & (all_lines_pu['connected2']) & (~all_lines_pu['fictitious'])].copy()
-        relevant_2w_trafos = all_2w_trafos_pu[(all_2w_trafos_pu['connected1']) & (all_2w_trafos_pu['connected2']) & (
-            ~all_2w_trafos_pu['fictitious'])].copy()
-
-        # Calculate impedance magnitude |Z| = sqrt(r^2 + x^2)
-        relevant_lines["z_abs"] = np.sqrt(relevant_lines["r"] ** 2 + relevant_lines["x"] ** 2)
-        relevant_2w_trafos["z_abs"] = np.sqrt(relevant_2w_trafos["r"] ** 2 + relevant_2w_trafos["x"] ** 2)
-
-        # For lines/2w trafos below the low impedance threshold, replace r and x values so that |Z| is around the low impedance threshold value
-        low_impedance_lines = relevant_lines.index[relevant_lines["z_abs"] < low_impedance_threshold]
-        low_impedance_2w_trafos = relevant_2w_trafos.index[relevant_2w_trafos["z_abs"] < low_impedance_threshold]
-
-        if len(low_impedance_lines) > 0:
-            # For short AC line segments typical X/R is ~10. We replace r and x values accordingly to match this logic for adequate P and Q distribution on relevant branches
-            self.network.update_lines(id=low_impedance_lines, r=[2.8856078516e-6] * len(low_impedance_lines),
-                                      x=[2.8856078516e-5] * len(low_impedance_lines))
-            logger.info(f"[WORKAROUND] Replaced {len(low_impedance_lines)} low impedance line segment r/x values")
-
-        if len(low_impedance_2w_trafos) > 0:
-            # For transformers typical X/R is ~20. We replace r and x values accordingly to match this logic for adequate P and Q distribution on relevant branches
-            self.network.update_2_windings_transformers(id=low_impedance_2w_trafos,
-                                                        r=[4.9938e-6] * len(low_impedance_2w_trafos),
-                                                        x=[9.9875e-5] * len(low_impedance_2w_trafos))
-            logger.info(f"[WORKAROUND] Replaced {len(low_impedance_2w_trafos)} low impedance 2w transformer r/x values")
-
-        # Reset network variant to non-PU mode
-        self.network.per_unit = False
+    def publish_voltage_results_to_elastic(self, results: list):
+        logger.info(f"Sending {len(results)} voltage monitoring results to Elastic")
+        # Derive the document id so re-running a scenario overwrites its
+        # results instead of adding a second copy of every document.
+        self.object_storage.elastic_service.send_to_elastic_bulk(
+            index=conf.elastic_voltage_results_index,
+            json_message_list=results,
+            id_from_metadata=True,
+            id_metadata_list=['@time_horizon', '@scenario_timestamp', 'cnec_id', 'limit_type'],
+            hashing=True,
+        )
 
     @performance_counter(units='seconds')
     def handle(self, message: bytes, properties: object, **kwargs):
-        """
-        Process received SAR profile
-        """
-        # Get unique x-message-id from headers, if not there - create
-        message_id = properties.headers.get('message-id', str(uuid.uuid4()))
+        headers = properties.headers
+        task = json.loads(message)
+        contingency_id = task['contingency_id']
+        violation_terminals = task['violation_terminals']
+
+        message_id = headers.get('message-id', str(uuid.uuid4()))
         if getattr(config.initialize_logging, 'elastic_handler', None):
             config.initialize_logging.elastic_handler.extra.update({
                 'message-id': message_id,
-                'source-module': properties.headers.get('source-module', 'unknown')
+                'batch-id': headers.get('batch-id'),
+                'contingency-id': contingency_id,
             })
-        logger.info(f"Handling message with id: {message_id}")
+        logger.info(f"Optimizing contingency: {contingency_id} (batch {headers.get('batch-id')})")
 
-        # Get metadata from properties
-        self.scenario_timestamp = getattr(properties, 'headers').get('scenario-time', datetime.now(timezone.utc))
-        if isinstance(self.scenario_timestamp, str):
-            self.scenario_timestamp = datetime.fromisoformat(self.scenario_timestamp)
-
-        # Store SAR to BytesIO object and load to triplets to scan violations
-        sar = BytesIO(message)
-        sar.name = f"{getattr(properties, 'headers').get('project-name', 'undefined')}.xml"
-        logger.info(f"Loading received SAR profile")
-        sar_data = pd.read_RDF([sar])
-        for key, value in sar_data.types_dict().items():
-            logger.debug(f"Loaded objects: {value} {key}")
-
-        # Get all violations from SAR profile
-        violations = sar_data.key_tableview("PowerFlowResult.isViolation")
-        violations = violations[violations["PowerFlowResult.isViolation"] == "true"]
-
-        # Filter by violation deadband
-        violations = violations[violations["PowerFlowResult.value"] >= VIOLATION_THRESHOLD_PERCENT]
-
-        # Filter to current violations only if defined by configuration
-        if self.current_violations_only:
-            if 'PowerFlowResult.valueA' in violations.columns:
-                violations = violations[violations['PowerFlowResult.valueA'].notna()]
-            else:
-                violations = pd.DataFrame()
-
-        # Exit if there is no relevant violations
-        if violations.empty:
-            logger.info("No violations found in SAR profile, exiting VirtualOperator process")
-            return message, properties
-        else:
-            logger.info(f"SAR profile contains number of relevant violations: {len(violations)}")
-
-        # Exit if there are more unique contingencies to be optimized than configured limit
-        if 'ContingencyPowerFlowResult.Contingency' in violations.columns:
-            _contingencies_count = len(violations['ContingencyPowerFlowResult.Contingency'].unique())
-            logger.info(f"SAR profile contains number of unique contingencies: {_contingencies_count}")
-            if _contingencies_count > CONTINGENCIES_COUNT_THRESHOLD:
-                logger.error("Number of unique contingencies is above threshold and message can not be processed")
-                return message, properties
-
-        # Get network model from object storage
-        content_reference = properties.headers.get('content-reference', None)
-        if not content_reference:
-            logger.error(f"RMQ message does not have content reference in headers")
-            return message, properties
-        network_object = self.get_network_model(content_reference=content_reference)
-
-        # Determine used loadflow settings during model merge
-        try:
-            _loadflow_settings_key = self.network_model_meta["loadflow_settings"]
-            logger.info(f"Loadflow settings defined by received merged model: {_loadflow_settings_key}")
-        except KeyError:
-            logger.warning(f"Loadflow settings not defined by received merged model, using default: BA_DEFAULT")
-            _loadflow_settings_key = "BA_DEFAULT"
+        # Load prepared network and CRAC built by the virtual operator
+        self.network = pypowsybl.network.load_from_binary_buffer(
+            buffer=self._download(task['network_bucket'], task['network_reference']))
+        crac_object = self._download(task['crac_bucket'], task['crac_reference'])
+        self.crac = json.loads(crac_object.getvalue())
 
         lf_settings_manager = LoadflowSettingsManager(
             elastic_server=self.object_storage.elastic_service.server,
             elastic_api_key=self.object_storage.elastic_service.api_key,
-            settings_keyword=_loadflow_settings_key,
+            settings_keyword=task['loadflow_settings'],
         )
 
-        logger.info(f"Loading network model to pypowsybl")
-        self.network = pypowsybl.network.load_from_binary_buffer(
-            buffer=network_object,
-            parameters=lf_settings_manager.config['CGMES_IMPORT_PARAMETERS'])
+        optimizer, profile, settings = self.optimize(
+            crac_object=crac_object,
+            loadflow_parameters=lf_settings_manager.build_pypowsybl_parameters())
 
-        # TODO Temporary: Replace 3w transformers with 3 x 2w transformers in the network
-        three_w_trafos = self.network.get_3_windings_transformers()
-        # Replace only 3w transformers that are XNEs
-        three_w_trafos_to_replace = three_w_trafos.index[ three_w_trafos[ "rated_u1" ] >= 330 ].tolist()
-        for tid in three_w_trafos_to_replace:
-            if tid not in self.network.get_3_windings_transformers().index:
-                logger.warning(f"Skipping {tid}: deleted from network [removed eq error not solved]")
-                continue
-            try:
-                pypowsybl.network.replace_3_windings_transformers_with_3_2_windings_transformers(self.network, [tid])
-            except Exception as e:
-                logger.error(f"Failed to replace {tid}: {e}")
-        logger.info("[TEMPORARY] Replaced 3w transformers with 3 x 2w transformers in the network")
-        two_w_trafos = self.network.get_2_windings_transformers()
-        replaced_ids = set(three_w_trafos_to_replace)
-        replaced_3w_trafos = two_w_trafos[ two_w_trafos.index.str.split("-Leg", n=1).str[ 0 ].isin(replaced_ids) ]
-
-        workaround_ctx = CracWorkaroundContext(
-            enable_3w_trafo_replacement=True,
-            replaced_3w_trafos=replaced_3w_trafos
-        )
-
-        # Solve initial loadflow on retrieved model
-        logger.info(f"Solve initial loadflow analysis")
-        lf_result = pypowsybl.loadflow.run_ac(
-            network=self.network,
-            parameters=lf_settings_manager.build_pypowsybl_parameters())
-        logger.info(f"Loadflow status: {lf_result[0]}")
-        if lf_result[0].status.value:
-            logger.error(f"Initial load flow computation failed, exiting message handling")
+        if optimizer.results is None:
+            logger.error(f"Optimizer has no results for contingency: {contingency_id}")
             return message, properties
 
-        # Get other input data from object storage
-        input_file_objects = self.get_input_profiles()
+        rao_results = optimizer.results.to_json()
+        if not rao_results['networkActionResults'] and not rao_results['rangeActionResults']:
+            logger.warning(f"No possible actions proposed by optimizer")
+        for optimized_action in rao_results['networkActionResults']:
+            logger.info(f"Optimized network action: {optimized_action}")
+        for optimized_action in rao_results['rangeActionResults']:
+            logger.info(f"Optimized range action: {optimized_action}")
 
-        # Load input files and SAR to triplets
-        logger.info(f"Loading additional input data")
-        input_files_data = pd.read_RDF(input_file_objects)
-        for key, value in input_files_data.types_dict().items():
-            logger.debug(f"Loaded objects: {value} {key}")
+        # Post-process the RAO result of one contingency and send it to Elastic
+        logger.info(f"Post-processing results")
+        results = self.post_process_results(results=pd.json_normalize(rao_results))
 
-        # Get default optimization parameters
-        optimizer_settings = RaoSettingsManager()
+        # Strip -Leg1/Leg2 from the 2w trafo CNECs that were replaced with the 3w-2w workaround
+        violation_ids = {f"_{terminal}" for terminal in violation_terminals}
+        base_element_ids = results["cnec.networkElementId"].astype(str).str.replace(r'-Leg\d+$', '', regex=True)
 
-        # Create CRAC service
-        logger.info(f"Loading network to triplets for CRAC service")
-        network_triplets = pd.read_RDF(network_object)
-        crac_service = CracBuilder(data=input_files_data, network=network_triplets, workaround=workaround_ctx)
-        crac_service.get_limits()  # get limits from model and store in CRAC service object
+        # Flag CNECs which were identified as violations from received SAR profile
+        results['cnec.sourceViolation'] = base_element_ids.isin(violation_ids)
 
-        # Group by contingency id
-        # TODO assess performance and consider to avoid groupby and only iterator over unique contingencies
-        for mrid, data in violations.groupby("ContingencyPowerFlowResult.Contingency"):
+        # Include message properties and optimization main relevant settings as meta
+        results['rmq'] = [headers] * len(results)
+        results['settings'] = [settings.profile] * len(results)
 
-            logger.info(f"Processing contingency: {mrid} with {len(data)} violations")
-            logger.info(f"Violations on network elements: {data['PowerFlowResult.EquipmentName'].to_list()}")
+        # Send results to Elastic
+        self.publish_flow_results_to_elastic(results=results)
 
-            # Build CRAC for each contingency
-            self.crac = crac_service.build_crac(contingency_ids=[mrid])
+        # Voltage monitoring results to Elastic
+        if optimizer.voltage_monitoring_results is not None:
+            voltage_results = optimizer.voltage_monitoring_results.get_voltage_cnec_results()
+            if not voltage_results.empty:
+                applied_actions = build_applied_actions(rao_results=rao_results, crac=self.crac)
+                voltage_docs = build_voltage_documents(voltage_results=voltage_results,
+                                                       crac=self.crac,
+                                                       network=self.network,
+                                                       headers=headers,
+                                                       applied_actions=applied_actions)
+                self.publish_voltage_results_to_elastic(results=voltage_docs)
 
-            # For debugging
-            with open("test-crac-3w-testing.json", "w") as f:
-                json.dump(self.crac, f, ensure_ascii=False, indent=4)
-
-            # Store built CRAC files in S3 storage
-            crac_object = BytesIO(json.dumps(self.crac, ensure_ascii=False, indent=2).encode('utf-8'))
-            crac_object.name = f"RAO/CRAC_{properties.headers['time-horizon']}_{self.scenario_timestamp:%Y%m%dT%H%M}_CO_{mrid}.json"
-            self.object_storage.s3_service.upload_object(file_path_or_file_object=crac_object,
-                                                         bucket_name=S3_BUCKET_RESULTS,
-                                                         metadata=properties.headers)
-
-            # Perform lowImpedanceThreshold parameter workaround
-            # TODO temporary workaround due to SensitivityAnalyis
-            # self.perform_low_impedance_workaround() # old method, not used for the time being and replaced with new method
-
-            # Scan for low impedance gaps in the model (for lines, trafos)
-            from rao.find_low_impedance_gap import find_threshold_gap_branches, zero_out
-            gap, neg_x, _ = find_threshold_gap_branches(self.network, lo=1e-8, hi=3e-5)
-            logger.info(f"LOW-Z {len(gap)} elements in [1e-8 - 3e-5] pu: {gap.groupby('kind').size().to_dict()}")
-            for eid, row in gap.iterrows():
-                logger.info(f"LOW-Z {row.kind} {eid}: r={row.r:.3e} x={row.x:.3e} |z|={row.z_pu:.3e}")
-            # Zero out the resistance and reactance values for problematic grid elements failing lowImpedanceThreshold replacement
-            zero_out(self.network, gap)
-
-            # Start the optimization
-            optimizer = Optimizer(network=self.network,
-                                  crac_source=crac_object,
-                                  parameters_source=optimizer_settings.to_bytesio(),
-                                  loadflow_parameters=lf_settings_manager.build_pypowsybl_parameters(),
-                                  debug=self.debug)
-            optimizer.run()
-            logger.info(f"Optimization finished for contingency: {mrid}")
-
-            # Check optimizer results
-            if optimizer.results is None:
-                logger.warning("Optimizer has no results to be processed")
-                continue
-
-            # Serialize results to json
-            results = optimizer.results.to_json()
-            if results['computationStatus'] == 'failure':
-                logger.error(f"Optimizer failed computation: {results}")
-                logger.error(f"Enable pypowsybl logs for more information")
-                logger.warning("Attempting to relax RAO parameters and re-optimize")
-
-                rao_params_relaxed = json.load(optimizer_settings.to_bytesio())
-                rao_params_relaxed["extensions"]["open-rao-search-tree-parameters"]["load-flow-and-sensitivity-computation"]["sensitivity-parameters"]["load-flow-parameters"]["useReactiveLimits"] = False
-
-                if hasattr(crac_object, "seek"):
-                    crac_object.seek(0)
-                optimizer = Optimizer(network=self.network,
-                                      crac_source=crac_object,
-                                      parameters_source=BytesIO(json.dumps(rao_params_relaxed).encode('utf-8')),
-                                      debug=self.debug)
-                optimizer.run()
-                results = optimizer.results.to_json() if optimizer.results else None
-
-
-            # Check if there are any optimized remedial actions
-            if not results['networkActionResults'] and not results['rangeActionResults']:
-                logger.warning(f"No possible actions proposed by optimizer")
-            else:
-                for optimized_action in results['networkActionResults']:
-                    logger.info(f"Optimized network action: {optimized_action}")
-                    _details = [x for x in self.crac['networkActions'] if x['id'] == optimized_action['networkActionId']]
-                    logger.info(f"Action details: {_details[0]}")
-                for optimized_action in results['rangeActionResults']:
-                    # TODO print out action details
-                    logger.info(f"Optimized range action: {optimized_action}")
-
-            applied_actions = build_applied_actions(rao_results=results, crac=self.crac)
-            logger.info(f"Post-processing results")
-            results = self.post_process_results(results=pd.json_normalize(results))
-
-            # Strip -Leg1/Leg2 from the 2w trafo CNECs that were replaced with the 3w-2w workaround
-            violation_ids = set("_" + data['PowerFlowResult.ACDCTerminal'].astype(str))
-            base_element_ids = (results["cnec.networkElementId"].astype(str).str.replace(r'-Leg\d+$', '', regex=True))
-
-            # Flag CNECs which were identified as violations from received SAR profile
-            results['cnec.sourceViolation'] = base_element_ids.isin(violation_ids)
-
-            # Logging status of successful optimization process for contingency
-            logger.success(f"Optimization successful for contingency: {mrid}")
-
-            # Include message properties as meta
-            results['rmq'] = [properties.headers] * len(results)
-
-            # Include optimization main relevant settings
-            results['settings'] = [{"objective-function": optimizer_settings.get("objective-function.type")}] * len(results)
-
-            # Send results to Elastic
-            data_to_send = results.astype(object).where(pd.notna(results), None).to_dict("records")
-            logger.info(f"Sending optimization results to Elastic index: {ELASTIC_RESULTS_INDEX}")
-            self.object_storage.elastic_service.send_to_elastic_bulk(
-                index=ELASTIC_RESULTS_INDEX,
-                json_message_list=data_to_send,
-            )
-            # Voltage monitoring results to Elastic
-            if optimizer.voltage_monitoring_results is not None:
-                voltage_results = optimizer.voltage_monitoring_results.get_voltage_cnec_results()
-                if not voltage_results.empty:
-                    voltage_docs = build_voltage_documents(voltage_results=voltage_results,
-                                                           crac=self.crac,
-                                                           network=self.network,
-                                                           headers=properties.headers,
-                                                           applied_actions=applied_actions)
-
-                    logger.info(f"Sending {len(voltage_docs)} voltage monitoring results to Elastic")
-                    # Derive the document id so re-running a scenario overwrites its
-                    # results instead of adding a second copy of every document.
-                    self.object_storage.elastic_service.send_to_elastic_bulk(
-                        index=ELASTIC_VOLTAGE_RESULTS_INDEX,
-                        json_message_list=voltage_docs,
-                        id_from_metadata=True,
-                        id_metadata_list=['@time_horizon', '@scenario_timestamp', 'cnec_id', 'limit_type'],
-                        hashing=True,
-                    )
-        logger.success(f"Message handling completed successfully")
+        logger.success(f"Optimization handling completed for contingency: {contingency_id}")
 
         return message, properties
 
@@ -711,7 +512,7 @@ if __name__ == '__main__':
         "time-horizon": "ID",
         "content-reference": "EMFOS/RMM/ID/RMM_15_002_20260923T2030Z_BA_44a93f61-0158-483d-8cfc-dfe8959099ec.zip",
     }
-    properties = BasicProperties(
+    properties = pika.BasicProperties(
         content_type='application/octet-stream',
         delivery_mode=2,
         priority=4,

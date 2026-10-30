@@ -1,15 +1,11 @@
 import config
 from integrations import rmq
 from remedial_action_schedules.handlers import HandlerRemedialActionScheduleToElastic
-from common.config_parser import parse_app_properties
+from remedial_action_schedules.settings import SchedulesConsumerSettings
 from loguru import logger
-from pathlib import Path
 from uuid import uuid4
 
-parse_app_properties(caller_globals=globals(),
-                     path=str(Path(__file__).parent.joinpath("config.properties")),
-                     section="CONSUMER",
-                     eval_types=True)
+consumer_settings = SchedulesConsumerSettings()
 
 # Set worker name and unique id to Elastic log handler
 worker_id = str(uuid4())
@@ -19,7 +15,7 @@ if getattr(config.initialize_logging, 'elastic_handler', None):
 # RabbitMQ consumer implementation
 logger.info(f"Starting 'remedial-action-schedules' worker with assigned trace id: {worker_id}")
 consumer = rmq.RMQConsumer(
-    queue=RMQ_QUEUE_IN,
+    queue=consumer_settings.rmq_queue_in,
     message_handlers=[HandlerRemedialActionScheduleToElastic()],
 )
 try:
