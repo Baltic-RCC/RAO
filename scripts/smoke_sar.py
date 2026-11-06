@@ -1,12 +1,14 @@
-"""Smoke test of rao.sar.generate_sar that runs without Elastic and nc-profile-service.
+"""Smoke test of rao.sar.generate_sar: reads RAO results from Elastic, generates the SAR with nc-profile-service,
+prints the start of the profile and saves it to a file.
 
-By default sample RAO results are used instead of Elastic and a local stub stands in for nc-profile-service. The stub
-only echoes the request, so the output shows exactly what is sent to the service, not the real SAR XML.
+Hosts come from the settings (environment or config/.env): ELK_SERVER, ELK_TOKEN, ELK_SSL_VERIFY (and SSL_CERT_FILE
+when verifying) and NC_PROFILE_SERVICE_URL.
 
-    python scripts/smoke_sar.py                                    # sample results + stub
-    python scripts/smoke_sar.py --service-url http://localhost:8000    # sample results + real nc-profile-service
-    python scripts/smoke_sar.py --elastic --scenario-time 2026-09-23T22:30:00Z --time-horizon ID
-                                                                   # real Elastic results (ELK_* env, SSL_CERT_FILE)
+    python scripts/smoke_sar.py --scenario-time 2026-09-23T22:30:00Z --time-horizon ID
+
+Offline variants for when a service is not available: --sample-data uses built-in RAO results instead of Elastic,
+--echo-service uses a local stub that returns the request instead of nc-profile-service (output is then the JSON
+request sent to the service, not the SAR XML).
 """
 import argparse
 import json
@@ -102,31 +104,37 @@ def start_echo_service() -> str:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--scenario-time", default="2026-09-23T22:30:00Z")
-    parser.add_argument("--time-horizon", default="ID")
-    parser.add_argument("--elastic", action="store_true", help="query real Elastic instead of sample results")
-    parser.add_argument("--service-url", help="real nc-profile-service instead of the echo stub")
-    parser.add_argument("--output", help="save the response to file, otherwise first lines are printed")
+    parser.add_argument("--scenario-time", required=True, help="ISO timestamp, e.g. 2026-09-23T22:30:00Z")
+    parser.add_argument("--time-horizon", required=True, help="e.g. ID")
+    parser.add_argument("--service-url", help="nc-profile-service URL, default is the NC_PROFILE_SERVICE_URL setting")
+    parser.add_argument("--output", help="file to save the response to, default SAR_<horizon>_<time>.xml")
+    parser.add_argument("--sample-data", action="store_true", help="use built-in RAO results instead of Elastic")
+    parser.add_argument("--echo-service", action="store_true", help="use a local stub instead of nc-profile-service")
     args = parser.parse_args()
 
-    elastic = None if args.elastic else use_sample_results()
-    sar.conf.nc_profile_service_url = args.service_url or start_echo_service()
-    print(f"--- nc-profile-service: {sar.conf.nc_profile_service_url}" + ("" if args.service_url else " (echo stub)"))
+    elastic = use_sample_results() if args.sample_data else None
+    if args.echo_service:
+        sar.conf.nc_profile_service_url = start_echo_service()
+    elif args.service_url:
+        sar.conf.nc_profile_service_url = args.service_url
+    print(f"--- Results from: {'sample data' if args.sample_data else 'Elastic'}")
+    print(f"--- nc-profile-service: {sar.conf.nc_profile_service_url}" + (" (echo stub)" if args.echo_service else ""))
 
     request = sar.SarRequest(scenario_time=args.scenario_time, time_horizon=args.time_horizon)
     content = sar.generate_sar(request, elastic=elastic)
     if content is None:
         raise SystemExit("No RAO results found, nothing to generate")
 
-    if args.output:
-        Path(args.output).write_bytes(content)
-        print(f"--- Response saved to {args.output} ({len(content)} bytes)")
-    else:
-        lines = content.decode().splitlines()
-        print(f"--- Response ({len(content)} bytes)")
-        print("\n".join(lines[:MAX_LINES]))
-        if len(lines) > MAX_LINES:
-            print(f"... {len(lines) - MAX_LINES} more lines, use --output to save the whole response")
+    extension = "json" if args.echo_service else "xml"
+    output = Path(args.output or f"SAR_{request.time_horizon}_{request.scenario_time:%Y%m%dT%H%M}.{extension}")
+    output.write_bytes(content)
+
+    lines = content.decode().splitlines()
+    print(f"--- Response ({len(content)} bytes, {len(lines)} lines)")
+    print("\n".join(lines[:MAX_LINES]))
+    if len(lines) > MAX_LINES:
+        print(f"... {len(lines) - MAX_LINES} more lines")
+    print(f"--- Saved to {output.resolve()}")
 
 
 if __name__ == "__main__":
