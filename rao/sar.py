@@ -1,12 +1,12 @@
 """Generate a SecurityAnalysisResult (SAR) profile from RAO results stored in Elastic.
 
-Reads the post-RAO flow of every CNEC optimized for one scenario timestamp and time horizon from the RAO results
-index and lets nc-profile-service serialize them as PowerFlowResults.
+Reads the RAO result documents of one scenario timestamp, time horizon and run id from the RAO results index, keeps
+the latest optimization run of each contingency and the CNECs that have a remedial action applied, and sends their
+post-RAO values to nc-profile-service, which generates the SAR profile.
 
-    sar = generate_sar(SarRequest(scenario_time="2026-09-23T22:30:00Z", time_horizon="ID"))
+    sar = generate_sar(SarRequest(scenario_time="2026-09-23T22:30:00Z", time_horizon="ID", run_id="09"))
 """
-from datetime import datetime, timedelta, timezone
-import numpy as np
+from datetime import datetime, timezone
 import pandas as pd
 import pytz
 import requests
@@ -21,14 +21,18 @@ conf = RaoHandlerSettings()
 
 SAR_ENDPOINT = "/api/v1/security-analysis-result/generate"
 
-# Fields of the documents written by HandlerOptimizer (rmq holds the headers of the optimization task)
+# Fields of the RAO result documents identifying the requested run, keyword subfields are used for exact matching
 SCENARIO_TIME_FIELD = "@scenario_timestamp"
 TIME_HORIZON_FIELD = "@time_horizon.keyword"
 RUN_ID_FIELD = "@run_id.keyword"
 
 
 class SarRequest(BaseModel):
-    """What to generate. Naive timestamps are taken as UTC, strings must be ISO formatted."""
+    """SAR to generate: scenario_time, time_horizon and run_id select the RAO results.
+
+    The model is also the nc-profile-service request, generate_sar fills `results` with the post-RAO values.
+    Naive timestamps are taken as UTC, strings must be ISO formatted.
+    """
     scenario_time: datetime
     time_horizon: str
     run_id: str
@@ -44,7 +48,7 @@ class SarRequest(BaseModel):
 
 
 def fetch_results(elastic: Elastic, request: SarRequest) -> pd.DataFrame:
-    """Get all RAO result documents of the requested scenario timestamp and time horizon, flattened to columns."""
+    """Get all RAO result documents of the requested scenario timestamp, time horizon and run id, flattened to columns."""
     scenario_time = request.scenario_time.isoformat()
     query = {"bool": {"filter": [
         {"range": {SCENARIO_TIME_FIELD: {"gte": scenario_time, "lte": scenario_time}}},
@@ -75,7 +79,10 @@ def _number(value) -> float | None:
 
 
 def request_profile(payload) -> bytes:
-    """Let nc-profile-service serialize the profile, returns the SAR file content."""
+    """Send the payload to nc-profile-service and return the generated SAR file content.
+
+    Certificate verification of the service is disabled. Raises requests.HTTPError if the service responds with error.
+    """
     url = f"{conf.nc_profile_service_url.rstrip('/')}{SAR_ENDPOINT}"
     response = requests.post(url,
                              json=payload,
@@ -91,7 +98,10 @@ def request_profile(payload) -> bytes:
 def generate_sar(request: SarRequest, elastic: Elastic | None = None) -> bytes | None:
     """Generate SAR profile from the latest RAO results of the requested scenario timestamp, time horizon and run id.
 
-    Returns the profile file content or None if there are no RAO results for the request.
+    Only CNECs with an applied remedial action are reported, one entry per result document. An entry has the
+    post-RAO flow and loading (percent of the ampere limit) at the CNEC's own instant, the contingency and the
+    remedial action it was activated for. Returns the profile file content or None if there is nothing to report:
+    no RAO results for the request or no remedial action applied in them.
     """
     elastic = elastic or Elastic()
 
@@ -100,14 +110,21 @@ def generate_sar(request: SarRequest, elastic: Elastic | None = None) -> bytes |
         logger.warning(f"No RAO results found for {request.scenario_time.isoformat()} [{request.time_horizon}-{request.run_id}]")
         return None
 
-    # Filter to latest runs and exclude failed computations
+    # Keep the latest run of each contingency and warn about failed computations
     results = keep_latest_runs(results)
     failed = results.loc[results["computationStatus"] == "failure", "rmq.contingency-id"].unique()
     if len(failed):
         logger.warning(f"Optimization failed for contingencies, reported values are not optimized: {failed.tolist()}")
 
-    # Filter to only optimized RA documents
-    results = results[results["networkActionId"].notna()]
+    # Filter to only optimized RA documents, the column does not exist if no network action was applied in any of them
+    if "networkActionId" in results.columns:
+        results = results[results["networkActionId"].notna()]
+    else:
+        results = results.iloc[0:0]
+    if results.empty:
+        logger.warning(f"No remedial actions applied in RAO results of {request.scenario_time.isoformat()} "
+                       f"[{request.time_horizon}-{request.run_id}], nothing to report")
+        return None
 
     # Remove transformers Leg definitions from CNEC identifiers
     results = results.assign(**{"cnec.networkElementId": results["cnec.networkElementId"].str.replace(r"-Leg\d+$", "", regex=True)})
