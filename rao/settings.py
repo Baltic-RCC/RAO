@@ -33,5 +33,3 @@ class RaoHandlerSettings(AppSettings):
     nc_profile_service_url: str = "http://nc-profile-service:8000"
     nc_profile_service_timeout: int = 60
     sar_publisher: str = "38X-BALTIC-RSC-H"
-    sar_reported_by_region: str = "BALTIC"
-    sar_period_minutes: int = 15

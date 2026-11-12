@@ -322,6 +322,30 @@ class HandlerOptimizer:
 
         return optimizer, profile, settings
 
+    def map_substations_to_results(self, results: pd.DataFrame):
+        identifiables = self.network.get_identifiables(id=results['cnec.networkElementId'].to_list())
+        elements = []
+        for type, gdf in identifiables.groupby('type'):
+            single_type_df = self.network.get_elements(element_type=getattr(pypowsybl.network.ElementType, type),
+                                                       id=gdf.index)
+            single_type_df['type'] = type
+            elements.append(single_type_df)
+        if elements:
+            elements = pd.concat(elements)
+
+        elements["voltage_level_id"] = elements["voltage_level_id"].combine_first(elements["voltage_level1_id"])
+        voltage_levels = self.network.get_voltage_levels(all_attributes=True).rename(
+            columns={"name": "voltage_level_name"})
+        substations = self.network.get_substations(all_attributes=True).rename(columns={"name": "substation_name"})
+
+        elements = elements.merge(voltage_levels, left_on='voltage_level_id', right_index=True, suffixes=(None, '_voltage_level'))
+        elements = elements.merge(substations, left_on='substation_id', right_index=True, suffixes=(None, '_substation'))
+
+        mapping = elements["substation_name"].to_dict()
+        results["cnec.substation"] = results["cnec.networkElementId"].map(mapping)
+
+        return results
+
     @performance_counter(units='seconds')
     def post_process_results(self, results: pd.DataFrame):
 
@@ -347,6 +371,9 @@ class HandlerOptimizer:
         cnec_df = pd.DataFrame(self.crac['flowCnecs'])
         cnec_df.columns = [f"cnec.{col}" for col in cnec_df.columns]
         results = results.merge(cnec_df, how='left', left_on='cnecResults.flowCnecId', right_on='cnec.id').drop(columns='cnec.id')
+
+        # Map substations names to CNECs
+        results = self.map_substations_to_results(results=results)
 
         # Map contingency data
         contingency_df = pd.DataFrame(self.crac['contingencies'])
