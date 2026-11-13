@@ -29,3 +29,6 @@ class RaoHandlerSettings(AppSettings):
     elastic_results_index: str = "rao-results"
     elastic_voltage_results_index: str = "rao-voltage-results"
     debug: bool = False
+    # SAR generation
+    nc_profile_service_url: str = "http://nc-profile-service:8000"
+    nc_profile_service_timeout: int = 60
