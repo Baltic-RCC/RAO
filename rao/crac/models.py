@@ -140,6 +140,15 @@ class TerminalsAction(BaseModel):
         return f"_{value}"
 
 
+class SwitchAction(BaseModel):
+    networkElementId: str
+    actionType: Literal['open', 'close']
+
+    @field_serializer("networkElementId", when_used='unless-none')
+    def serialize_with_prefix(self, value: str) -> str:
+        return f"_{value}"
+
+
 class ShuntCompensatorPositionAction(BaseModel):
     networkElementId: str
     sectionCount: int = Field(default=0, validation_alias=AliasChoices("normalValue", "sectionCount"))
@@ -153,17 +162,53 @@ class NetworkAction(BaseModel):
     id: str
     name: str
     operator: str
+    activationCost: Optional[float] = None  # set by CracBuilder.apply_costs (rao.crac.costs)
     onInstantUsageRules: List[Dict]
     terminalsConnectionActions: Optional[List[TerminalsAction]] = None
     shuntCompensatorPositionActions: Optional[List[ShuntCompensatorPositionAction]] = None
+    # Bay switches closed with a terminals 'close' (CracBuilder.attach_bay_switch_actions)
+    switchActions: Optional[List[SwitchAction]] = None
 
-    @field_validator("terminalsConnectionActions", "shuntCompensatorPositionActions", mode='before')
+    @field_validator("terminalsConnectionActions", "shuntCompensatorPositionActions", "switchActions", mode='before')
     @classmethod
     def empty_list_to_none(cls, value: List[Any] | None) -> List[Any] | None:
         # Checks if the value is a list and empty, returns None
         if isinstance(value, list) and not value:
             return None
         return value
+
+
+class VariationCosts(BaseModel):
+    """Cost per MW of moving a range action set-point up or down."""
+    up: float
+    down: float
+
+
+class InjectionRange(BaseModel):
+    """
+    OpenRAO injection range. OpenRAO intersects all ranges of one range action:
+        - 'absolute': bounds on the set-point itself (MW when the element key is 1.0)
+        - 'relativeToInitialNetwork': bounds on the variation from the initial set-point
+    """
+    rangeType: Literal['absolute', 'relativeToInitialNetwork', 'relativeToPreviousInstant']
+    min: float
+    max: float
+
+
+class InjectionRangeAction(BaseModel):
+    """
+    OpenRAO InjectionRangeAction (redispatch, countertrade). Network element IDs are written as given
+    (no '_' prefix is added, unlike the CNEC models), they must already match the IIDM generator IDs.
+    """
+    id: str
+    name: str
+    operator: str
+    activationCost: Optional[float] = None
+    variationCosts: Optional[VariationCosts] = None
+    onInstantUsageRules: Optional[List[Dict]] = None
+    onContingencyStateUsageRules: Optional[List[Dict]] = None
+    networkElementIdsAndKeys: Dict[str, float]
+    ranges: List[InjectionRange]
 
 
 class Crac(BaseModel):
@@ -191,6 +236,8 @@ class Crac(BaseModel):
     # Kept unset unless the opt-in ER VoltageAngleLimit processing is requested.
     angleCnecs: Optional[List[AngleCnec]] = None
     networkActions: List[NetworkAction] = Field(default_factory=list)
+    # Kept unset unless redispatch or countertrade injection range actions are added
+    injectionRangeActions: Optional[List[InjectionRangeAction]] = None
 
     @field_serializer("voltageCnecs", mode='plain')
     def serialize_voltage_cnecs(self, values: List[VoltageCnec]) -> List[VoltageCnec]:
