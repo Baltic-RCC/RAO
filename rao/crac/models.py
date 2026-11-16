@@ -140,6 +140,15 @@ class TerminalsAction(BaseModel):
         return f"_{value}"
 
 
+class SwitchAction(BaseModel):
+    networkElementId: str
+    actionType: Literal['open', 'close']
+
+    @field_serializer("networkElementId", when_used='unless-none')
+    def serialize_with_prefix(self, value: str) -> str:
+        return f"_{value}"
+
+
 class ShuntCompensatorPositionAction(BaseModel):
     networkElementId: str
     sectionCount: int = Field(default=0, validation_alias=AliasChoices("normalValue", "sectionCount"))
@@ -157,8 +166,10 @@ class NetworkAction(BaseModel):
     onInstantUsageRules: List[Dict]
     terminalsConnectionActions: Optional[List[TerminalsAction]] = None
     shuntCompensatorPositionActions: Optional[List[ShuntCompensatorPositionAction]] = None
+    # Bay switches closed with a terminals 'close' (CracBuilder.attach_bay_switch_actions)
+    switchActions: Optional[List[SwitchAction]] = None
 
-    @field_validator("terminalsConnectionActions", "shuntCompensatorPositionActions", mode='before')
+    @field_validator("terminalsConnectionActions", "shuntCompensatorPositionActions", "switchActions", mode='before')
     @classmethod
     def empty_list_to_none(cls, value: List[Any] | None) -> List[Any] | None:
         # Checks if the value is a list and empty, returns None

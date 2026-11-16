@@ -6,6 +6,7 @@ import triplets
 from rao.crac import models
 import json
 from common.decorators import performance_counter
+from rao.crac.bay_switches import BaySwitches
 from rao.crac.context import CracWorkaroundContext
 from rao.crac.costly_ra.boundary_injection_lookup import find_boundary_lines
 from rao.crac.costs import CostConfig, OPPOSITE_DIRECTION_SUFFIX, injection_range_action_types, network_action_types
@@ -33,11 +34,13 @@ class CracBuilder:
         self._crac = None
         self.workaround = workaround or CracWorkaroundContext()
         self.costs = costs
-        # pypowsybl network the RAO runs on: boundary lines and weakly connected substations (costs) are read from it
+        # pypowsybl network the RAO runs on: boundary lines and weakly connected substations (costs) and open bay
+        # switches are read from it
         self.iidm_network = iidm_network
         # Lines counted from this voltage for weakly connected substations, None disables the check
         self.weak_substation_min_kv = weak_substation_min_kv
         self._substation_lines = None
+        self._bay_switches = None
 
         # BaseVoltage nominal voltages live in the EQ boundary file, capture them before it is excluded
         self.base_voltages = {}
@@ -1270,6 +1273,62 @@ class CracBuilder:
             logger.info(f"[WORKAROUND] Remedial actions: replaced {replaced_count} 3W terminal connection actions with {created_count} leg-specific terminal connection actions"
             )
 
+    def attach_bay_switch_actions(self):
+        """
+        Close the open bay switches (rao.crac.bay_switches) together with each terminals 'close' action. Equipment
+        taken out by an open breaker or disconnector keeps its terminals connected, a terminals 'close' alone does
+        nothing then. 'open' actions are left as they are, opening by terminal works in every modelling style.
+        Needs the pypowsybl network (only read), switches are looked up once per equipment.
+        """
+        if self.iidm_network is None:
+            return
+        if self._bay_switches is None:
+            # Once per network, the CRAC is built once per contingency
+            self._bay_switches = BaySwitches(self.iidm_network)
+
+        close_actions = attached = no_path = not_found = ties = 0
+        for network_action in self._crac.networkActions:
+            closing = [t for t in network_action.terminalsConnectionActions or [] if t.actionType == "close"]
+            if not closing:
+                continue
+            close_actions += 1
+            switch_ids, missing, unknown, tie = [], False, False, False
+            for terminal_action in closing:
+                element_id = f"_{terminal_action.networkElementId}"
+                if element_id not in self._bay_switches:
+                    # e.g. not imported (bay without topological node) or a 3w transformer that was not replaced
+                    unknown = True
+                    logger.warning(f"{terminal_action.networkElementId} of remedial action {network_action.name} "
+                                   f"({network_action.id}) is not a line, 2w transformer or boundary line of the "
+                                   f"pypowsybl network, bay switches not looked up")
+                    continue
+                found, found_tie = self._bay_switches.find(element_id)
+                if found is None:
+                    missing = True
+                    logger.warning(f"No path from {terminal_action.networkElementId} to other equipment of its voltage "
+                                   f"level, no bay switches closed for it by remedial action {network_action.name} "
+                                   f"({network_action.id})")
+                    continue
+                # Model ids are kept without the leading '_', the serializer adds it
+                switch_ids += [i for i in map(self._normalize_grid_element_id, found) if i not in switch_ids]
+                tie |= found_tie
+            no_path += missing
+            not_found += unknown
+            if not switch_ids:
+                continue
+            network_action.switchActions = [models.SwitchAction(networkElementId=i, actionType="close")
+                                            for i in switch_ids]
+            attached += 1
+            ties += tie
+            logger.info(f"Remedial action {network_action.name} ({network_action.id}) closes bay switches: "
+                        f"{', '.join(switch_ids)}"
+                        f"{' (open switches tie, picked by switch id order)' if tie else ''}")
+
+        if close_actions:
+            logger.info(f"Bay switches: {attached} of {close_actions} network actions with a terminals 'close' got "
+                        f"switch actions, {no_path} without a path to other equipment, {not_found} with equipment "
+                        f"not found in the network, {ties} with a tie-break")
+
     @performance_counter(units='seconds')
     def apply_costs(self) -> dict[str, list[str]]:
         """
@@ -1347,6 +1406,9 @@ class CracBuilder:
         if self.workaround:
             logger.info("[WORKAROUND] Applying 3w transformer replacement workaround to Remedial actions")
             self.remedial_actions_3w_workaround()
+
+        # Equipment out by open bay switches: close them with its terminals 'close' actions
+        self.attach_bay_switch_actions()
 
         # Assign remedial action costs, once all remedial actions are built
         self.apply_costs()
