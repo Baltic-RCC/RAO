@@ -13,9 +13,10 @@ from common.object_storage import ObjectStorage, conf
 from common.decorators import performance_counter
 from rao.crac.builder import CracBuilder
 from rao.crac.context import CracWorkaroundContext
+from rao.crac.costs import CostConfig
 from rao.parameters.manager import RaoSettingsManager
 from rao.parameters.manager import LoadflowSettingsManager
-from rao.parameters.profiles import RAO_PROFILES
+from rao.parameters.profiles import OBJECTIVE_OVERRIDES, RAO_PROFILES
 from rao.optimizer import Optimizer
 from rao.settings import RaoHandlerSettings
 from rao.voltage_monitoring import build_applied_actions
@@ -226,7 +227,10 @@ class HandlerVirtualOperator:
         # Create CRAC service
         logger.info(f"Loading network to triplets for CRAC service")
         network_triplets = pd.read_RDF(network_object)
-        crac_service = CracBuilder(data=input_files_data, network=network_triplets, workaround=workaround_ctx)
+        crac_costs = CostConfig.from_file(conf.crac_costs_path) if conf.crac_costs_path else None
+        weak_substation_min_kv = conf.crac_weak_substation_min_kv if conf.crac_weak_substation_check else None
+        crac_service = CracBuilder(data=input_files_data, network=network_triplets, workaround=workaround_ctx,
+                                   costs=crac_costs, iidm_network=self.network, weak_substation_min_kv=weak_substation_min_kv)
         crac_service.get_limits()  # get limits from model and store in CRAC service object
 
         # Store prepared network (with workarounds applied) so optimizer workers do not repeat them
@@ -305,8 +309,10 @@ class HandlerOptimizer:
         for profile in RAO_PROFILES:
             settings = RaoSettingsManager()
             settings.profile = profile
+            settings.set(OBJECTIVE_OVERRIDES[conf.rao_objective])
             settings.set(profile["overrides"])
-            logger.info(f"Running optimization with RAO profile: {profile['name']}")
+            logger.info(f"Running optimization with RAO profile: {profile['name']}, "
+                        f"objective function: {settings.get('objective-function.type')}")
 
             optimizer = Optimizer(network=self.network,
                                   crac_source=crac_object,

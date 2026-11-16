@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Literal
 from config.settings import AppSettings, ConsumerSettings
 
@@ -25,7 +26,15 @@ class RaoHandlerSettings(AppSettings):
     s3_crac_prefix: str = "RAO"
     s3_crac_bucket: str = "opde-confidential-analyses"
     rmq_queue_out: str = "rao.violations-optimization"
+    # Remedial action costs (YAML or JSON), unset: built-in costs of rao.crac.costs
+    crac_costs_path: Path | None = None
+    # Topology actions leaving a substation on <= 1 line at or above crac_weak_substation_min_kv (kV)
+    # get the 'topologyWeakSubstation' activation cost
+    crac_weak_substation_check: bool = True
+    crac_weak_substation_min_kv: float = 330.0
     # Optimizer
+    # RAO objective function (rao.parameters.profiles.OBJECTIVE_OVERRIDES), only MIN_COST uses the remedial action costs
+    rao_objective: Literal["MIN_COST", "MAX_MIN_MARGIN"] = "MIN_COST"
     elastic_results_index: str = "rao-results"
     elastic_voltage_results_index: str = "rao-voltage-results"
     debug: bool = False

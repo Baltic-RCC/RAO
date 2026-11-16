@@ -7,6 +7,9 @@ from rao.crac import models
 import json
 from common.decorators import performance_counter
 from rao.crac.context import CracWorkaroundContext
+from rao.crac.costly_ra.boundary_injection_lookup import find_boundary_lines
+from rao.crac.costs import CostConfig, OPPOSITE_DIRECTION_SUFFIX, injection_range_action_types, network_action_types
+from rao.crac.substation_security import SubstationLines, weak_substation_actions
 
 
 class CracBuilder:
@@ -21,13 +24,20 @@ class CracBuilder:
     MIN_MONITORED_NOMINAL_VOLTAGE_KV = 330.0
     EXCLUDED_MODEL_AUTHORS = ()
 
-    def __init__(self, data: pd.DataFrame, network: pd.DataFrame | None, workaround: CracWorkaroundContext | None = None):
+    def __init__(self, data: pd.DataFrame, network: pd.DataFrame | None, workaround: CracWorkaroundContext | None = None,
+                 costs: CostConfig | None = None, iidm_network=None, weak_substation_min_kv: float | None = None):
         logger.info(f"CRAC builder initialized")
         self.data = data
         self.network = network
         self.limits = None
         self._crac = None
         self.workaround = workaround or CracWorkaroundContext()
+        self.costs = costs
+        # pypowsybl network the RAO runs on: boundary lines and weakly connected substations (costs) are read from it
+        self.iidm_network = iidm_network
+        # Lines counted from this voltage for weakly connected substations, None disables the check
+        self.weak_substation_min_kv = weak_substation_min_kv
+        self._substation_lines = None
 
         # BaseVoltage nominal voltages live in the EQ boundary file, capture them before it is excluded
         self.base_voltages = {}
@@ -1127,7 +1137,7 @@ class CracBuilder:
                 logger.debug(f"Remedial action defined with 'upAndDown' direction, adding opposite terminal connection actions")
                 _opposite_terminal_actions = [x.model_copy(update={"actionType": _get_opposite_terminal_connection_value(x.actionType)}) for x in actions]
                 _updates = {
-                    "id": f"{data['IdentifiedObject.mRID_GridStateAlterationRemedialAction'].iloc[0]}-opposite-direction",
+                    "id": f"{data['IdentifiedObject.mRID_GridStateAlterationRemedialAction'].iloc[0]}{OPPOSITE_DIRECTION_SUFFIX}",
                     "terminalsConnectionActions": _opposite_terminal_actions,
                 }
                 opposite_network_action = network_action.model_copy(update=_updates)
@@ -1261,6 +1271,56 @@ class CracBuilder:
             )
 
     @performance_counter(units='seconds')
+    def apply_costs(self) -> dict[str, list[str]]:
+        """
+        Assign costs (rao.crac.costs) to all remedial actions of the CRAC: activationCost on
+        network (topological) actions and injection range actions, variationCosts on range
+        actions. Activation costs follow the remedial action type (cheapest first): upAndDown
+        topology actions, other network actions, topology actions leaving a substation weakly
+        connected, countertrade, topology actions on boundary lines, redispatch. Without a cost config
+        the built-in costs are used (only the MIN_COST objective uses costs).
+        Runs after the contingencies and all remedial actions are built (weak substations are checked
+        in the contingency states, opposite-direction actions included).
+        Returns {action id: cost values taken from defaults}.
+        """
+        costs = self.costs or CostConfig()
+        network_actions = self._crac.networkActions
+        # Redispatch and countertrade injection range actions, when added to the CRAC
+        injection_actions = self._crac.injectionRangeActions or []
+
+        # Boundary lines come from the pypowsybl network, the remedial action lists do not mark them
+        if self.iidm_network is None:
+            logger.debug("No pypowsybl network, topology actions on boundary lines are not detected")
+            boundary_line_ids = set()
+        else:
+            boundary_line_ids = find_boundary_lines(self.iidm_network)
+        network_types = network_action_types(network_actions, boundary_line_ids, self._weak_substation_actions(),
+                                             costs.activation_costs)
+        boundary_actions = sorted(i for i, t in network_types.items() if t == "topologyBoundaryLine")
+        if boundary_actions:
+            logger.info(f"{len(boundary_actions)} topology actions on boundary lines: {', '.join(boundary_actions)}")
+
+        defaulted = {}
+        defaulted.update(costs.apply(network_actions, action_type="network action", types=network_types))
+        defaulted.update(costs.apply(injection_actions, action_type="injection range action",
+                                     types=injection_range_action_types(injection_actions)))
+        logger.info(f"Remedial action costs assigned to {len(network_actions)} network actions and "
+                    f"{len(injection_actions)} injection range actions")
+        return defaulted
+
+    def _weak_substation_actions(self) -> set[str]:
+        """Topology actions leaving a substation on <= 1 line (rao.crac.substation_security), when enabled."""
+        if self.weak_substation_min_kv is None:
+            return set()
+        if self.iidm_network is None:
+            logger.warning("No pypowsybl network, topology actions leaving a substation weakly connected are not detected")
+            return set()
+        if self._substation_lines is None:
+            # Once per network, the CRAC is built once per contingency
+            self._substation_lines = SubstationLines.from_network(self.iidm_network, min_kv=self.weak_substation_min_kv)
+        return set(weak_substation_actions(self._crac, self._substation_lines))
+
+    @performance_counter(units='seconds')
     def build_crac(self, contingency_ids: list | None = None):
 
         # Initialize CRAC object
@@ -1287,6 +1347,9 @@ class CracBuilder:
         if self.workaround:
             logger.info("[WORKAROUND] Applying 3w transformer replacement workaround to Remedial actions")
             self.remedial_actions_3w_workaround()
+
+        # Assign remedial action costs, once all remedial actions are built
+        self.apply_costs()
 
         # Update the CRAC flowCNEC limits from network
         self.update_limits_from_network()
