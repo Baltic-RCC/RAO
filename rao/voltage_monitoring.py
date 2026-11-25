@@ -24,6 +24,13 @@ def _elementary_actions(crac_action: dict):
             'actionType': None,
             'sectionCount': elementary.get('sectionCount'),
         }
+    for elementary in (crac_action.get('switchActions') or []):
+        yield {
+            'elementaryType': 'switch',
+            'networkElementId': elementary.get('networkElementId'),
+            'actionType': elementary.get('actionType'),
+            'sectionCount': None,
+        }
 
 
 def _collapse(values: list) -> Any:

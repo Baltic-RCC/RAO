@@ -13,9 +13,10 @@ from common.object_storage import ObjectStorage, conf
 from common.decorators import performance_counter
 from rao.crac.builder import CracBuilder
 from rao.crac.context import CracWorkaroundContext
+from rao.crac.costs import CostConfig
 from rao.parameters.manager import RaoSettingsManager
 from rao.parameters.manager import LoadflowSettingsManager
-from rao.parameters.profiles import RAO_PROFILES
+from rao.parameters.profiles import OBJECTIVE_OVERRIDES, RAO_PROFILES
 from rao.optimizer import Optimizer
 from rao.settings import RaoHandlerSettings
 from rao.voltage_monitoring import build_applied_actions
@@ -226,7 +227,10 @@ class HandlerVirtualOperator:
         # Create CRAC service
         logger.info(f"Loading network to triplets for CRAC service")
         network_triplets = pd.read_RDF(network_object)
-        crac_service = CracBuilder(data=input_files_data, network=network_triplets, workaround=workaround_ctx)
+        crac_costs = CostConfig.from_file(conf.crac_costs_path) if conf.crac_costs_path else None
+        weak_substation_min_kv = conf.crac_weak_substation_min_kv if conf.crac_weak_substation_check else None
+        crac_service = CracBuilder(data=input_files_data, network=network_triplets, workaround=workaround_ctx,
+                                   costs=crac_costs, iidm_network=self.network, weak_substation_min_kv=weak_substation_min_kv)
         crac_service.get_limits()  # get limits from model and store in CRAC service object
 
         # Store prepared network (with workarounds applied) so optimizer workers do not repeat them
@@ -305,8 +309,10 @@ class HandlerOptimizer:
         for profile in RAO_PROFILES:
             settings = RaoSettingsManager()
             settings.profile = profile
+            settings.set(OBJECTIVE_OVERRIDES[conf.rao_objective])
             settings.set(profile["overrides"])
-            logger.info(f"Running optimization with RAO profile: {profile['name']}")
+            logger.info(f"Running optimization with RAO profile: {profile['name']}, "
+                        f"objective function: {settings.get('objective-function.type')}")
 
             optimizer = Optimizer(network=self.network,
                                   crac_source=crac_object,
@@ -321,6 +327,30 @@ class HandlerOptimizer:
             logger.warning(f"Optimization failed with RAO profile: {profile['name']}")
 
         return optimizer, profile, settings
+
+    def map_substations_to_results(self, results: pd.DataFrame):
+        identifiables = self.network.get_identifiables(id=results['cnec.networkElementId'].to_list())
+        elements = []
+        for type, gdf in identifiables.groupby('type'):
+            single_type_df = self.network.get_elements(element_type=getattr(pypowsybl.network.ElementType, type),
+                                                       id=gdf.index)
+            single_type_df['type'] = type
+            elements.append(single_type_df)
+        if elements:
+            elements = pd.concat(elements)
+
+        elements["voltage_level_id"] = elements["voltage_level_id"].combine_first(elements["voltage_level1_id"])
+        voltage_levels = self.network.get_voltage_levels(all_attributes=True).rename(
+            columns={"name": "voltage_level_name"})
+        substations = self.network.get_substations(all_attributes=True).rename(columns={"name": "substation_name"})
+
+        elements = elements.merge(voltage_levels, left_on='voltage_level_id', right_index=True, suffixes=(None, '_voltage_level'))
+        elements = elements.merge(substations, left_on='substation_id', right_index=True, suffixes=(None, '_substation'))
+
+        mapping = elements["substation_name"].to_dict()
+        results["cnec.substation"] = results["cnec.networkElementId"].map(mapping)
+
+        return results
 
     @performance_counter(units='seconds')
     def post_process_results(self, results: pd.DataFrame):
@@ -347,6 +377,9 @@ class HandlerOptimizer:
         cnec_df = pd.DataFrame(self.crac['flowCnecs'])
         cnec_df.columns = [f"cnec.{col}" for col in cnec_df.columns]
         results = results.merge(cnec_df, how='left', left_on='cnecResults.flowCnecId', right_on='cnec.id').drop(columns='cnec.id')
+
+        # Map substations names to CNECs
+        results = self.map_substations_to_results(results=results)
 
         # Map contingency data
         contingency_df = pd.DataFrame(self.crac['contingencies'])
