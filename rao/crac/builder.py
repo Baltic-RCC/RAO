@@ -1055,6 +1055,11 @@ class CracBuilder:
         grid_state_alteration = self.data.key_tableview("GridStateAlteration.GridStateAlterationRemedialAction",
                                                         string_to_number=False)
         remedial_actions = self.data.type_tableview("GridStateAlterationRemedialAction", string_to_number=False)
+        # Exclude remedial actions which normalAvailable = false
+        not_available = remedial_actions["RemedialAction.normalAvailable"].astype(str).str.lower() == "false"
+        for name in remedial_actions.loc[not_available, "IdentifiedObject.name"]:
+            logger.warning(f"Remedial action excluded due to 'normalAvailable' is false: {name}")
+        remedial_actions = remedial_actions[~not_available]
         remedial_actions = remedial_actions.merge(grid_state_alteration,
                                                   left_on="IdentifiedObject.mRID",
                                                   right_on="GridStateAlteration.GridStateAlterationRemedialAction",
