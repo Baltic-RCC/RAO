@@ -3,6 +3,7 @@ import time
 import pika
 import traceback
 import signal
+import threading
 from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor
 from loguru import logger
@@ -357,16 +358,21 @@ class RMQConsumer:
                  username: str = conf.rmq_username,
                  password: str = conf.rmq_password.get_secret_value(),
                  message_handlers: List[object] | None = None,
-                 message_converter: object | None = None):
+                 message_converter: object | None = None,
+                 handle_signals: bool = True):
 
         """Create a new instance of the consumer class, passing in the AMQP
         URL used to connect to RabbitMQ.
 
         If 'reply_to' is provided messaged will be published to given exchange/queue name
 
+        If 'handle_signals' is True, SIGTERM/SIGINT handlers are installed on run() which
+        stop the consumer gracefully (in-flight message is finished and ACKed first)
+
         """
         self.message_handlers = message_handlers
         self.message_converter = message_converter
+        self._handle_signals = handle_signals
         self.should_reconnect = False
         self.was_consuming = False
         self.reply_to = reply_to
@@ -387,6 +393,9 @@ class RMQConsumer:
         self._username = username
         self._executor = ThreadPoolExecutor()
         self._executor_stopped = False
+
+        # Delivery tags currently being processed in the executor (accessed only from the ioloop thread)
+        self._inflight = set()
 
         # Whether a clean shutdown has been requested via signal
         self._shutdown_requested = False
@@ -437,6 +446,11 @@ class RMQConsumer:
         :param pika.SelectConnection _unused_connection: The connection
         :param Exception err: The error
         """
+        if self._closing:
+            # Opening was aborted by a requested shutdown
+            logger.info(f"Connection open aborted due to shutdown: {err}")
+            self._connection.ioloop.stop()
+            return
         logger.error(f"Connection open failed", exc_info=err)
         self.reconnect()
 
@@ -499,6 +513,8 @@ class RMQConsumer:
         :param Exception reason: why the channel was closed
         """
         logger.warning(f"Channel {channel} was closed: {reason}")
+        # Delivery tags of a closed channel can't be settled anymore, broker will redeliver them
+        self._inflight.clear()
         self.close_connection()
 
     def set_qos(self):
@@ -528,6 +544,9 @@ class RMQConsumer:
         cancel consuming. The on_message method is passed in as a callback pika
         will invoke when a message is fully received.
         """
+        if self._closing:
+            logger.info("Shutdown in progress, not starting consumer")
+            return
         logger.info("Issuing consumer related RPC commands")
         self.add_on_cancel_callback()
         self._consumer_tag = self._channel.basic_consume(self._queue, self.on_message)
@@ -552,44 +571,69 @@ class RMQConsumer:
         if self._channel:
             self._channel.close()
 
-    def _process_messages(self, basic_deliver, properties, body):
+    def _process_messages(self, channel, basic_deliver, properties, body):
+        """Runs in the executor thread. Must not perform channel operations directly
+        (pika is not thread-safe); the result is handed back to the ioloop thread."""
         ack = True
 
-        # Convert if needed
-        if self.message_converter:
-            try:
-                body, content_type = self.message_converter.convert(body)
-                properties.content_type = content_type
-                logger.info(f"Message converted")
-            except Exception as error:
-                logger.error(f"Message conversion failed: {error}\n{traceback.format_exc()}")
-                ack = False
-                # Schedule reject back on the ioloop thread (channel ops are not thread-safe)
-                self._connection.ioloop.call_soon_threadsafe(
-                    self._channel.basic_reject, basic_deliver.delivery_tag, False
-                )
-
-        if self.message_handlers:
-
-            for message_handler in self.message_handlers:
+        try:
+            # Convert if needed
+            if self.message_converter:
                 try:
-                    logger.info(f"Handling message with handler: {message_handler.__class__.__name__}")
-                    body, properties = message_handler.handle(body, properties=properties, channel=self._channel)
+                    body, content_type = self.message_converter.convert(body)
+                    properties.content_type = content_type
+                    logger.info(f"Message converted")
                 except Exception as error:
-                    logger.error(f"Message handling failed: {error}\n{traceback.format_exc()}")
-                    logger.exception("Message handling failed, see traceback in document")
+                    logger.error(f"Message conversion failed: {error}\n{traceback.format_exc()}")
                     ack = False
-                    self._channel.basic_reject(basic_deliver.delivery_tag, requeue=False)
-                    # self.connection.close()
-                    # self.stop()
 
-        # Publish message to next exchange/queue if provided
-        if ack and self.reply_to:
-            logger.info(f"Publishing message to exchange/queue: {self.reply_to}")
-            self._channel.basic_publish(exchange=self.reply_to, routing_key="", body=body, properties=properties)
+            if ack and self.message_handlers:
 
-        if ack:
-            self.acknowledge_message(basic_deliver.delivery_tag)
+                for message_handler in self.message_handlers:
+                    try:
+                        logger.info(f"Handling message with handler: {message_handler.__class__.__name__}")
+                        body, properties = message_handler.handle(body, properties=properties, channel=channel)
+                    except Exception as error:
+                        logger.error(f"Message handling failed: {error}\n{traceback.format_exc()}")
+                        logger.exception("Message handling failed, see traceback in document")
+                        ack = False
+                        break
+        finally:
+            # Settle the message on the ioloop thread (also wakes the ioloop up)
+            self._connection.ioloop.add_callback_threadsafe(
+                functools.partial(self._on_message_processed, channel, basic_deliver.delivery_tag, ack, body, properties)
+            )
+
+    def _on_message_processed(self, channel, delivery_tag, ack, body, properties):
+        """Invoked on the ioloop thread once the executor finished processing a message.
+        Publishes the result, ACKs/rejects the message and completes a pending graceful shutdown.
+        """
+        if channel is self._channel:
+            self._inflight.discard(delivery_tag)
+
+        if channel is not self._channel or not channel.is_open:
+            # Delivery tags are channel scoped; broker will redeliver the message
+            logger.warning(f"Channel closed before message #{delivery_tag} could be settled, it will be redelivered")
+        elif not ack:
+            logger.info(f"Rejecting message {delivery_tag}")
+            channel.basic_reject(delivery_tag, requeue=False)
+        else:
+            published = True
+            # Publish message to next exchange/queue if provided
+            if self.reply_to:
+                logger.info(f"Publishing message to exchange/queue: {self.reply_to}")
+                try:
+                    channel.basic_publish(exchange=self.reply_to, routing_key="", body=body, properties=properties)
+                except Exception as error:
+                    # Leave unacked so the message is redelivered
+                    logger.error(f"Publish failed: {error}")
+                    published = False
+            if published:
+                self.acknowledge_message(delivery_tag)
+
+        # Consumer was cancelled due to shutdown and was waiting for this message to finish
+        if self._closing and not self._consuming:
+            self._close_channel_when_drained()
 
     def on_message(self, _unused_channel, basic_deliver, properties, body):
         """Invoked by pika when a message is delivered from RabbitMQ. The
@@ -606,7 +650,8 @@ class RMQConsumer:
         logger.info(
             f"Received message #{basic_deliver.delivery_tag} from {properties.app_id} meta: {properties.headers}")
         logger.debug(f"Message body: {body}")
-        self._executor.submit(self._process_messages, basic_deliver, properties, body)
+        self._inflight.add(basic_deliver.delivery_tag)
+        self._executor.submit(self._process_messages, _unused_channel, basic_deliver, properties, body)
 
     def acknowledge_message(self, delivery_tag):
         """Acknowledge the message delivery from RabbitMQ by sending a
@@ -620,7 +665,7 @@ class RMQConsumer:
         """Tell RabbitMQ that you would like to stop consuming by sending the
         Basic.Cancel RPC command.
         """
-        if self._channel:
+        if self._channel and self._channel.is_open and self._consumer_tag:
             logger.info("Sending a Basic.Cancel RPC command to RabbitMQ")
             cb = functools.partial(self.on_cancelok, userdata=self._consumer_tag)
             self._channel.basic_cancel(self._consumer_tag, cb)
@@ -635,20 +680,37 @@ class RMQConsumer:
         """
         self._consuming = False
         logger.info(f"RabbitMQ acknowledged the cancellation of the consumer: {userdata}")
-        self._executor.shutdown(wait=True)
+        self._close_channel_when_drained()
+
+    def _close_channel_when_drained(self):
+        """Close the channel once no messages are in flight. If some are, this is
+        called again from _on_message_processed. The ioloop is not blocked while waiting
+        so heartbeats keep flowing.
+        """
+        if self._inflight:
+            logger.info(f"Waiting for {len(self._inflight)} in-flight message(s) to finish before closing channel")
+            return
+        self._executor.shutdown(wait=False)
+        self._executor_stopped = True
         self.close_channel()
 
     def close_channel(self):
         """Call to close the channel with RabbitMQ cleanly by issuing the
         Channel.Close RPC command.
         """
-        logger.info("Closing the channel")
-        self._channel.close()
+        if self._channel and self._channel.is_open:
+            logger.info("Closing the channel")
+            self._channel.close()
 
     def run(self):
         """Run the example consumer by connecting to RabbitMQ and then
         starting the IOLoop to block and allow the SelectConnection to operate.
         """
+        if self._handle_signals:
+            self.install_signal_handlers()
+        if self._shutdown_requested:
+            logger.info("Shutdown requested, not starting consumer")
+            return
         if self._executor_stopped:
             self._executor = ThreadPoolExecutor()
             self._executor_stopped = False
@@ -676,9 +738,28 @@ class RMQConsumer:
             self._executor_stopped = True
             logger.info(f"Stopped")
 
+    def install_signal_handlers(self):
+        """Route SIGTERM (Kubernetes/KEDA scale-down) and SIGINT (CTRL+C) to request_shutdown().
+        Signal handlers can only be installed from the main thread.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            logger.warning("Signal handlers can only be installed from the main thread, skipping")
+            return
+        signal.signal(signal.SIGTERM, self._on_term_signal)
+        signal.signal(signal.SIGINT, self._on_term_signal)
+
+    def _on_term_signal(self, signum, _frame):
+        """
+        Handle SIGTERM / SIGINT. Does NOT call stop() directly because pika
+        channel/ioloop methods must be invoked from the ioloop thread, not from
+        an async signal handler.
+        """
+        logger.info(f"Received signal {signal.Signals(signum).name}, requesting graceful shutdown")
+        self.request_shutdown()
+
     def request_shutdown(self):
         """
-        Signal-safe entry point called from worker.py's SIGTERM handler.
+        Signal-safe entry point called from the SIGTERM/SIGINT handler.
         Schedules a graceful stop on the ioloop thread so pika's internals
         are never touched from the signal handler directly.
         """
@@ -686,7 +767,21 @@ class RMQConsumer:
             self._shutdown_requested = True
             logger.info("Graceful shutdown requested — will stop after current message")
             if self._connection and not self._connection.is_closed:
-                self._connection.ioloop.add_callback_threadsafe(self.stop_consuming)
+                self._connection.ioloop.add_callback_threadsafe(self._graceful_stop)
+
+    def _graceful_stop(self):
+        """Invoked on the ioloop thread after request_shutdown(). Cancels the consumer
+        (in-flight message is finished and ACKed before the channel is closed) or, if
+        consuming has not started yet, closes the connection right away.
+        """
+        if self._closing:
+            return
+        self._closing = True
+        if self._consuming and self._channel and self._channel.is_open:
+            self.stop_consuming()
+        else:
+            # Still connecting / setting up the channel
+            self.close_connection()
 
 
 class ReconnectingConsumer:
