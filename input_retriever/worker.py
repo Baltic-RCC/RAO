@@ -4,7 +4,6 @@ from input_retriever.handlers import HandlerMetadataToObjectStorage, HandlerInpu
 from input_retriever.settings import InputRetrieverConsumerSettings
 from loguru import logger
 from uuid import uuid4
-import signal
 
 
 consumer_settings = InputRetrieverConsumerSettings()
@@ -25,28 +24,6 @@ consumer = rmq.RMQConsumer(
     queue=consumer_settings.rmq_queue_in,
     message_handlers=handlers,
 )
-
-
-def handle_shutdown(signum, frame):
-    """
-    Handle SIGTERM / SIGINT from Kubernetes (or the OS).
-
-    We delegate to consumer.request_shutdown() which:
-      - sets a flag so no new reconnects are attempted
-      - lets the in-flight message finish processing and be ACKed
-      - then stops the ioloop and drains the thread pool cleanly
-
-    We do NOT call consumer.stop() directly here because stop() calls
-    pika channel/ioloop methods and those must be invoked from the ioloop
-    thread, not from an async signal handler.
-    """
-    logger.info(f"Received signal {signal.Signals(signum).name}, requesting graceful shutdown")
-    consumer.request_shutdown()
-
-
-signal.signal(signal.SIGTERM, handle_shutdown)
-signal.signal(signal.SIGINT, handle_shutdown)
-
 try:
     consumer.run()
 except KeyboardInterrupt:
