@@ -8,10 +8,9 @@ from loguru import logger
 from integrations.s3_storage import S3Minio
 from integrations.elastic import Elastic
 from common.rdf_converter import convert_cim_rdf_to_json, normalize_cim_payload
-from common.object_storage import conf
 from input_retriever.settings import InputRetrieverHandlerSettings
 
-handler_settings = InputRetrieverHandlerSettings()
+conf = InputRetrieverHandlerSettings()
 
 
 class HandlerMetadataToObjectStorage:
@@ -74,9 +73,9 @@ class HandlerMetadataToObjectStorage:
 class HandlerInputDataToElastic:
 
     KEYWORD_MAP = {
-        "CO": {"root_class": ["OrdinaryContingency", "ExceptionalContingency", "OutOfRangeContingency"], "index": handler_settings.elastic_contingencies_index},
-        "AE": {"root_class": ["AssessedElement"], "index": handler_settings.elastic_assessed_elements_index},
-        "RA": {"root_class": ["GridStateAlterationRemedialAction"], "index": handler_settings.elastic_remedial_actions_index},
+        "CO": {"root_class": ["OrdinaryContingency", "ExceptionalContingency", "OutOfRangeContingency"], "index": conf.elastic_contingencies_index},
+        "AE": {"root_class": ["AssessedElement"], "index": conf.elastic_assessed_elements_index},
+        "RA": {"root_class": ["GridStateAlterationRemedialAction"], "index": conf.elastic_remedial_actions_index},
     }
 
     def __init__(self):
@@ -93,7 +92,7 @@ class HandlerInputDataToElastic:
         # Convert message from NC to JSON
         data = convert_cim_rdf_to_json(rdfxml=message,
                                        root_class=self.KEYWORD_MAP[keyword]["root_class"],
-                                       key_mode=handler_settings.converter_key_mode)
+                                       key_mode=conf.converter_key_mode)
 
         # JSON normalize and transform to DataFrame
         df = normalize_cim_payload(payload=data, root_only=True)

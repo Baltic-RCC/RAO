@@ -8,6 +8,9 @@ class InputRetrieverConsumerSettings(ConsumerSettings):
 
 class InputRetrieverHandlerSettings(AppSettings):
     converter_key_mode: str = "local"
+    s3_bucket_out: str = "pdn-data"
+    s3_bucket_out_prefix: str = "CSA"
+    elastic_metadata_index: str = "csa-input-metadata"
     elastic_contingencies_index: str = "csa-contingencies"
     elastic_assessed_elements_index: str = "csa-assessed-elements"
     elastic_remedial_actions_index: str = "csa-remedial-actions"
