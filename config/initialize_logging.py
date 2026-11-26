@@ -13,6 +13,10 @@ from config.settings import LoggingSettings, ElasticSettings
 
 conf = LoggingSettings()
 
+# Build metadata baked into container images by CI (docker-bake.hcl), defaults apply to local runs
+APP_VERSION = os.getenv("APP_VERSION", "dev")
+GIT_SHA = os.getenv("GIT_SHA", "unknown")
+
 
 class InterceptHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
@@ -121,6 +125,7 @@ logging.basicConfig(handlers=[InterceptHandler()], level=conf.log_level, force=T
 logger.remove()  # remove all existing handlers to have fresh setup
 logger.add(sink=sys.stderr, level=conf.log_level, filter=std_log_filter)
 logger.debug(f"Stream logger initialized with level: {conf.log_level}")
+logger.info(f"Application version: {APP_VERSION} (revision {GIT_SHA})")
 
 # Configure Elastic sink according configuration
 if conf.elastic_logs_handler:
@@ -133,7 +138,9 @@ if conf.elastic_logs_handler:
     elastic_handler = ElasticLogHandler(server=elastic_settings.elk_server,
                                         api_key=elastic_settings.elk_token.get_secret_value(),
                                         index=conf.elastic_logs_index,
-                                        ssl_verify=elastic_settings.elk_ssl_verify)
+                                        ssl_verify=elastic_settings.elk_ssl_verify,
+                                        # every log document carries the software version that produced it
+                                        extra={"app_version": APP_VERSION, "git_sha": GIT_SHA})
     logger.add(sink=elastic_handler.write,
                level=conf.log_level,
                serialize=True,

@@ -1,5 +1,5 @@
 name: Trivy image scan
-description: Scan a local image with Trivy, print a table to the log and upload SARIF to the Security tab. Report only.
+description: Scan a local image with Trivy and print a table to the log. Optionally upload SARIF to the Security tab and/or fail on fixable critical vulnerabilities.
 
 inputs:
   image-ref:
@@ -8,6 +8,14 @@ inputs:
   category:
     description: SARIF category, one per image so results don't overwrite each other
     required: true
+  upload-sarif:
+    description: Upload SARIF results to the GitHub Security tab (only meaningful for the default branch)
+    required: false
+    default: 'false'
+  gate:
+    description: Fail the step when fixable CRITICAL vulnerabilities are found. Accepted risks go to .trivyignore
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -22,6 +30,7 @@ runs:
         severity: 'CRITICAL,HIGH'
 
     - name: Run Trivy vulnerability scanner for security tab
+      if: inputs.upload-sarif == 'true'
       uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
       continue-on-error: true
       with:
@@ -34,10 +43,22 @@ runs:
         limit-severities-for-sarif: true
 
     - name: Upload Trivy scan results to GitHub Security tab
+      if: inputs.upload-sarif == 'true'
       uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
       continue-on-error: true
       with:
         sarif_file: '${{ inputs.category }}.sarif'
         category: ${{ inputs.category }}
         sha: ${{ github.sha }}
-        ref: refs/heads/main
+        ref: ${{ github.ref }}
+
+    - name: Fail on fixable critical vulnerabilities
+      if: inputs.gate == 'true'
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        image-ref: ${{ inputs.image-ref }}
+        vuln-type: 'os,library'
+        format: 'table'
+        severity: 'CRITICAL'
+        ignore-unfixed: true
+        exit-code: '1'

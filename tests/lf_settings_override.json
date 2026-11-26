@@ -12,7 +12,6 @@
   "LF_PARAMETERS": {
     "write_slack_bus": true,
     "distributed_slack": false,
-    "countries_to_balance": ["LT", "LV", "EE"],
-    "connected_component_mode": "MAIN"
+    "countries_to_balance": ["LT", "LV", "EE"]
   }
 }

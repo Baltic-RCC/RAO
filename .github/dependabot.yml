@@ -1,0 +1,40 @@
+version: 2
+
+updates:
+  # Python dependencies (uv.lock). pypowsybl is a group of its own: every minor version needs a matching entry
+  # in RaoSettingsManager.RAO_PARAMETERS_VERSION_MAP, the unit tests fail on a bump that lacks it.
+  - package-ecosystem: uv
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      pypowsybl:
+        patterns:
+          - "pypowsybl"
+      python-dependencies:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "pypowsybl"
+
+  # Actions used by workflows and by the local composite action (pinned by commit SHA)
+  - package-ecosystem: github-actions
+    directories:
+      - "/"
+      - "/.github/actions/trivy-scan"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # python base image digest in the root Dockerfile
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday

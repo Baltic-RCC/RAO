@@ -46,7 +46,7 @@ def test_log_level_accepts_number_or_name(monkeypatch, value, expected):
 def test_consumer_queue_defaults_per_worker(monkeypatch):
     monkeypatch.delenv("RMQ_QUEUE_IN", raising=False)
     assert OperatorConsumerSettings(_env_file=None).rmq_queue_in == "rao.violations"
-    assert OptimizerConsumerSettings(_env_file=None).rmq_queue_in == "rao.optimization"
+    assert OptimizerConsumerSettings(_env_file=None).rmq_queue_in == "rao.violations-optimization"
 
 
 def test_invalid_consumer_type_rejected(monkeypatch):
