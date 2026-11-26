@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -714,7 +714,7 @@ requires-dist = [
     { name = "pip", specifier = ">=25.1.1" },
     { name = "pydantic", specifier = ">=2.11.5" },
     { name = "pydantic-settings", specifier = ">=2.16.1" },
-    { name = "pypowsybl", specifier = ">=1.13.0" },
+    { name = "pypowsybl", specifier = ">=1.16.1" },
     { name = "rdflib", specifier = ">=7.1.4" },
     { name = "requests", specifier = ">=2.32.3" },
     { name = "setuptools", specifier = ">=80.4.0" },

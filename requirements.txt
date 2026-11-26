@@ -15,7 +15,7 @@ pandas==2.2.3
     #   triplets
 prettytable==3.16.0
     # via pypowsybl
-pypowsybl==1.11.0
+pypowsybl==1.16.1
     # via rao (pyproject.toml)
 python-dateutil==2.9.0.post0
     # via pandas
