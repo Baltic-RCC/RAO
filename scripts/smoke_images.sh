@@ -11,10 +11,18 @@ TAG="${1:?usage: $0 <tag> [registry]}"
 REGISTRY="${2:-balticrcc}"
 EXPECTED_VERSION="${EXPECTED_VERSION:-}"
 
+# Importing integrations.rmq / the S3 helpers builds their settings at import time and those have required
+# credentials (see config/settings.py). Dummy values are enough: nothing connects during the imports.
+# A developer machine usually has config/.env, which is not part of the images, so check this in a container.
+DUMMY_SETTINGS=(
+  -e RMQ_USERNAME=smoke -e RMQ_PASSWORD=smoke
+  -e MINIO_USERNAME=smoke -e MINIO_PASSWORD=smoke
+)
+
 run_in() {
   local image="$1" code="$2"
   echo "::group::smoke test ${image}"
-  docker run --rm -e EXPECTED_VERSION --entrypoint python "${image}" -c "${code}"
+  docker run --rm -e EXPECTED_VERSION "${DUMMY_SETTINGS[@]}" --entrypoint python "${image}" -c "${code}"
   echo "::endgroup::"
 }
 
