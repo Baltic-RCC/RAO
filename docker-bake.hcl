@@ -47,6 +47,10 @@ target "base" {
   inherits   = ["_common"]
   dockerfile = "Dockerfile"
   tags       = [for t in split(",", TAGS) : "${REGISTRY}/rao-base:${t}"]
+  labels = {
+    # Inherited by the service images, scripts/smoke_images.sh uses it to prove they were built on this base
+    "eu.baltic-rcc.rao.base.revision" = GIT_SHA
+  }
 }
 
 target "_service" {
@@ -57,8 +61,10 @@ target "_service" {
   }
   # Service Dockerfiles say "FROM balticrcc/rao-base:latest": build with the base from this very build,
   # not whatever "latest" happens to be in the registry.
+  # The key must NOT carry the ":latest" tag. BuildKit looks a FROM up without ":latest" and bake passes the
+  # key as written, so "balticrcc/rao-base:latest" here silently matches nothing and the registry image is used.
   contexts = {
-    "balticrcc/rao-base:latest" = "target:base"
+    "balticrcc/rao-base" = "target:base"
   }
 }
 

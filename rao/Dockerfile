@@ -19,7 +19,7 @@ COPY --chown=appuser:appuser rao/ ./rao/
 USER appuser
 
 # Start process (operator by default; the optimizer runs the same image with: rao/worker_optimizer.py)
-ENV PYTHONPATH="${PYTHONPATH}:/app" \
+ENV PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}/app" \
     APP_VERSION=${APP_VERSION} \
     GIT_SHA=${GIT_SHA}
 ENTRYPOINT ["python"]

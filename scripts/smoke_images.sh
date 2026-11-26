@@ -51,6 +51,21 @@ import config, integrations.rmq, input_retriever.handlers
 print('input-retriever image OK')
 "
 
+# The services must be built on the base from the same build (docker-bake.hcl "contexts"), not on whatever
+# rao-base:latest is in the registry. The base carries its build revision in a label that the services inherit.
+if [[ -n "${GIT_SHA:-}" ]]; then
+  echo "::group::base image lineage"
+  for image in "${REGISTRY}/rao:${TAG}" "${REGISTRY}/rao-input-retriever:${TAG}"; do
+    base_revision=$(docker image inspect --format '{{ index .Config.Labels "eu.baltic-rcc.rao.base.revision" }}' "${image}")
+    if [[ "${base_revision}" != "${GIT_SHA}" ]]; then
+      echo "${image} was not built on the base from this build: base revision '${base_revision}', expected '${GIT_SHA}'" >&2
+      exit 1
+    fi
+  done
+  echo "services are built on the base of revision ${GIT_SHA}"
+  echo "::endgroup::"
+fi
+
 # Test tooling must not leak into runtime images
 echo "::group::runtime image content"
 for image in "${REGISTRY}/rao:${TAG}" "${REGISTRY}/rao-input-retriever:${TAG}"; do

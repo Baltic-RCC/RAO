@@ -19,7 +19,7 @@ COPY --chown=appuser:appuser input_retriever/ ./input_retriever/
 USER appuser
 
 # Start process
-ENV PYTHONPATH="${PYTHONPATH}:/app" \
+ENV PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}/app" \
     APP_VERSION=${APP_VERSION} \
     GIT_SHA=${GIT_SHA}
 ENTRYPOINT ["python"]
