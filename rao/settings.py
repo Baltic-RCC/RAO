@@ -21,6 +21,8 @@ class RaoHandlerSettings(AppSettings):
     crac_use_limits_from_model: bool = True
     violation_threshold_percent: float = 100
     contingencies_count_threshold: int = 10
+    loadflow_settings_header: str = "loadflow-settings" #Optional LF settings RMQ message header
+    loadflow_settings_default: str = "BA_DEFAULT" #Default LF settings key definition when none is defined
     s3_prepared_model_prefix: str = "RAO"
     s3_prepared_model_bucket: str = "opde-confidential-models"
     s3_crac_prefix: str = "RAO"
