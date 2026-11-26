@@ -1,0 +1,161 @@
+name: Release
+
+# Triggered by a version tag, e.g. v1.4.0 (stable) or v1.5.0-rc.1 (pre-release).
+# The tag must match the version in pyproject.toml, see RELEASING.md.
+#
+# Published tags per image:
+#   v1.4.0       -> 1.4.0, 1.4 and (only if it is the highest stable version) latest
+#   v1.5.0-rc.1  -> 1.5.0-rc.1
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ${{ vars.DOCKER_USERNAME || 'balticrcc' }}
+
+jobs:
+  verify:
+    name: Verify tag and compute image tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tags: ${{ steps.v.outputs.tags }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          BASE_VERSION="${VERSION%%-*}"
+          PRERELEASE=false
+          [[ "$VERSION" == *-* ]] && PRERELEASE=true
+
+          PYPROJECT_VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          PYPROJECT_BASE=$(grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' <<< "$PYPROJECT_VERSION")
+
+          if [[ "$BASE_VERSION" != "$PYPROJECT_BASE" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $PYPROJECT_VERSION in pyproject.toml"
+            exit 1
+          fi
+
+          if [[ "$PRERELEASE" == "true" ]]; then
+            TAGS="$VERSION"
+          else
+            if [[ "$VERSION" != "$PYPROJECT_VERSION" ]]; then
+              echo "::error::Tag $GITHUB_REF_NAME does not match version $PYPROJECT_VERSION in pyproject.toml"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "::error::Tagged commit is not on main, stable releases are cut from main"
+              exit 1
+            fi
+            TAGS="${VERSION},${VERSION%.*}"
+            # only the highest stable version moves "latest" (a hotfix of an older line must not)
+            HIGHEST=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -n1)
+            [[ "$HIGHEST" == "$GITHUB_REF_NAME" ]] && TAGS="${TAGS},latest"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "Release $VERSION, image tags: $TAGS" >> "$GITHUB_STEP_SUMMARY"
+
+  test:
+    needs: verify
+    uses: ./.github/workflows/_test.yml
+
+  release:
+    name: Build, scan, publish
+    needs: [verify, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write # create the GitHub release
+    env:
+      APP_VERSION: ${{ needs.verify.outputs.version }}
+      GIT_SHA: ${{ github.sha }}
+      TAGS: ${{ needs.verify.outputs.tags }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Build first without pushing: what gets scanned is what gets published
+      - name: Build images
+        uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # v7.5.0
+        with:
+          source: .
+          files: |
+            docker-bake.hcl
+            .github/docker-bake.ci.hcl
+          targets: release
+          load: true
+
+      - name: Smoke test images
+        run: bash scripts/smoke_images.sh "$APP_VERSION" "$REGISTRY"
+        env:
+          EXPECTED_VERSION: ${{ env.APP_VERSION }}
+
+      # Gate is switched on with the repository variable TRIVY_GATE_ENABLED=true (report only until then)
+      - name: Scan input-retriever image
+        uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: ${{ env.REGISTRY }}/rao-input-retriever:${{ env.APP_VERSION }}
+          category: trivy-input-retriever
+          gate: ${{ vars.TRIVY_GATE_ENABLED == 'true' }}
+
+      - name: Scan optimizer image
+        uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: ${{ env.REGISTRY }}/rao:${{ env.APP_VERSION }}
+          category: trivy-optimizer
+          gate: ${{ vars.TRIVY_GATE_ENABLED == 'true' }}
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # Same build again: layers come from the builder cache, this time pushed with SBOM and provenance attestations
+      - name: Push images
+        uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # v7.5.0
+        with:
+          source: .
+          files: |
+            docker-bake.hcl
+            .github/docker-bake.ci.hcl
+          targets: release
+          push: true
+          sbom: true
+          provenance: mode=max
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists, leaving it as is"
+          else
+            flags=()
+            [[ "$PRERELEASE" == "true" ]] && flags+=(--prerelease)
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "$GITHUB_REF_NAME" "${flags[@]}"
+          fi

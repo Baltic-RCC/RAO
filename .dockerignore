@@ -3,11 +3,20 @@
 .git
 .github
 **/Dockerfile
+docker-bake.hcl
 README.md
+RELEASING.md
 .gitmodules
 .python-version
 DEPENDENCY_LICENSES.md
 .gitlab-ci.yml
 .gitignore
+# Not part of any image (images copy only the service folders they need)
+test-data
+tests
+examples
+scripts
+**/__pycache__
+**/*.pyc
 # Local secrets for debugging
 config/.env

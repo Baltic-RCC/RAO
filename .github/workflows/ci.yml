@@ -1,0 +1,115 @@
+name: CI
+
+# Pull requests: tests + build + smoke test + scan, nothing is published.
+# Push to main: the same, then publishes the "edge" and "sha-<commit>" images.
+# Releases are a separate workflow (release.yml), triggered by a version tag.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ${{ vars.DOCKER_USERNAME || 'balticrcc' }}
+  GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  test:
+    uses: ./.github/workflows/_test.yml
+
+  images:
+    name: Build, smoke test and scan images
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Set build metadata
+        run: |
+          VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "APP_VERSION=${VERSION}-dev+${GIT_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Build images
+        uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # v7.5.0
+        env:
+          TAGS: ci
+        with:
+          source: .
+          files: |
+            docker-bake.hcl
+            .github/docker-bake.ci.hcl
+          targets: default
+          load: true
+
+      - name: Smoke test images
+        run: bash scripts/smoke_images.sh ci "$REGISTRY"
+        env:
+          EXPECTED_VERSION: ${{ env.APP_VERSION }}
+
+      # Report only here, the gate is applied on release
+      - name: Scan input-retriever image
+        uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: ${{ env.REGISTRY }}/rao-input-retriever:ci
+          category: trivy-input-retriever
+          upload-sarif: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      - name: Scan optimizer image
+        uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: ${{ env.REGISTRY }}/rao:ci
+          category: trivy-optimizer
+          upload-sarif: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+  publish-edge:
+    name: Publish edge images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # one publish at a time so "edge" always ends up pointing to the newest main
+    concurrency:
+      group: publish-edge
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Set build metadata
+        run: |
+          VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "APP_VERSION=${VERSION}-dev+${GIT_SHA::7}" >> "$GITHUB_ENV"
+          echo "TAGS=edge,sha-${GIT_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Build and push images
+        uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # v7.5.0
+        with:
+          source: .
+          files: |
+            docker-bake.hcl
+            .github/docker-bake.ci.hcl
+          targets: default
+          push: true
+          # same attestations as a release, so edge behaves like what will be released
+          sbom: true
+          provenance: mode=max
