@@ -60,8 +60,12 @@ class HandlerVirtualOperator:
 
         # Validate received profiles
         df = pd.DataFrame(received_profiles)
-        if 'entity' in df.columns:
-            expected = set(itertools.product(set(requested_profile_types), set(self.network_model_meta['included'])))
+        included = self.network_model_meta.get('included')
+        if not included:
+            # Models without a merge report (e.g. OPI) do not list the TSOs they include
+            logger.warning(f"Network model metadata does not define included TSOs, skipping per-TSO completeness check")
+        elif 'entity' in df.columns:
+            expected = set(itertools.product(set(requested_profile_types), set(included)))
             received = set(zip(df['keyword'], df['entity']))
             missing = expected - received
 
@@ -88,6 +92,23 @@ class HandlerVirtualOperator:
         self.network_model_meta, content = self.object_storage.get_network_model(metadata=metadata)
 
         return content
+
+    def get_loadflow_settings_key(self, headers: dict) -> str:
+        """Return the key of loadflow settings used during model merge.
+
+        The merge report of the model takes precedence, then the message header (models without
+        a merge report, e.g. OPI), then the default settings.
+        """
+        if key := self.network_model_meta.get("loadflow_settings"):
+            logger.info(f"Loadflow settings defined by received merged model: {key}")
+        elif key := headers.get(conf.loadflow_settings_header):
+            logger.info(f"Loadflow settings defined by message header '{conf.loadflow_settings_header}': {key}")
+        else:
+            key = conf.loadflow_settings_default
+            logger.warning(f"Loadflow settings defined neither by received merged model nor by message header, "
+                           f"using default: {key}")
+
+        return key
 
     @performance_counter(units='seconds')
     def handle(self, message: bytes, properties: object, **kwargs):
@@ -154,12 +175,7 @@ class HandlerVirtualOperator:
         network_object = self.get_network_model(content_reference=content_reference)
 
         # Determine used loadflow settings during model merge
-        try:
-            _loadflow_settings_key = self.network_model_meta["loadflow_settings"]
-            logger.info(f"Loadflow settings defined by received merged model: {_loadflow_settings_key}")
-        except KeyError:
-            logger.warning(f"Loadflow settings not defined by received merged model, using default: BA_DEFAULT")
-            _loadflow_settings_key = "BA_DEFAULT"
+        _loadflow_settings_key = self.get_loadflow_settings_key(headers=properties.headers)
 
         lf_settings_manager = LoadflowSettingsManager(
             elastic_server=self.object_storage.elastic_service.server,

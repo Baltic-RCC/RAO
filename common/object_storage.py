@@ -137,7 +137,18 @@ class ObjectStorage:
         return content
 
     def get_network_model(self, metadata: Dict):
-        meta = self.query(metadata_query=metadata, index=conf.elastic_models_index)[0]
+        """Return the merge report of a network model and the model content.
+
+        Models without a merge report in the models index (e.g. OPI) are downloaded from the models bucket
+        by the content reference of the query alone, and the query itself is returned as their metadata.
+        """
+        reports = self.query(metadata_query=metadata, index=conf.elastic_models_index)
+        if reports:
+            meta = reports[0]
+        else:
+            logger.warning(f"Network model merge report not found in index {conf.elastic_models_index} for: "
+                           f"{metadata}, downloading model by content reference without metadata")
+            meta = dict(metadata)
         content = self.get_content(metadata=meta, bucket_name=conf.s3_bucket_in_models)
         return meta, content
 
