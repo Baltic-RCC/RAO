@@ -2,7 +2,7 @@
 #    uv pip compile pyproject.toml -o requirements.txt
 aniso8601==10.0.1
     # via triplets
-lxml==5.4.0
+lxml==6.1.0
     # via triplets
 networkx==3.4.2
     # via pypowsybl
